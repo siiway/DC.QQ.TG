@@ -31,8 +31,8 @@ jobs:
       - name: Get system architecture (Windows)
         if: runner.os == 'Windows'
         run: |
-          $arch = (wmic os get osarchitecture | select -Skip 1).Trim()
-          echo "Architecture=$arch" >> $GITHUB_ENV
+          $arch = (Get-WmiObject Win32_OperatingSystem).OSArchitecture
+          echo "Architecture=$arch" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
 
       - name: Get system architecture (Linux/macOS)
         if: runner.os != 'Windows'
@@ -43,25 +43,31 @@ jobs:
       - name: Debugging - Print Architecture
         run: echo "Architecture=${{ env.Architecture }}"
 
-      - name: Archive build files (Windows)
+      - name: Archive build files (Windows - PowerShell)
         if: runner.os == 'Windows'
         run: |
-          $short_commit_id = (git rev-parse --short HEAD)
+          $short_commit_id = $(git rev-parse --short HEAD)
           $artifact_name = "DQT-windows-${{ env.Architecture }}-$short_commit_id.zip"
-          echo "Artifact name: $artifact_name"
-          Compress-Archive -Path output/* -DestinationPath $artifact_name
+          Write-Host "Artifact name: $artifact_name"
+          Compress-Archive -Path output\* -DestinationPath $artifact_name
+          Get-ChildItem -Path . -Filter "*.zip"
 
-      - name: Archive build files (Linux/macOS)
+      - name: Archive build files (Linux/macOS - Bash)
         if: runner.os != 'Windows'
         run: |
           short_commit_id=$(git rev-parse --short HEAD)
           artifact_name="DQT-${{ runner.os }}-${{ env.Architecture }}-$short_commit_id.zip"
           echo "Artifact name: $artifact_name"
           zip -r $artifact_name output
-          ls -l
+          ls -l *.zip
 
-      - name: Debugging - List ZIP files before uploading
-        run: ls -l *.zip || dir *.zip
+      - name: Debugging - List ZIP files before uploading (Windows)
+        if: runner.os == 'Windows'
+        run: Get-ChildItem -Path . -Filter "*.zip"
+
+      - name: Debugging - List ZIP files before uploading (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: ls -l *.zip
 
       - name: Upload all zip artifacts with system info
         uses: actions/upload-artifact@v4
