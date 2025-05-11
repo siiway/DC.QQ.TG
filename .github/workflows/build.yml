@@ -1,0 +1,40 @@
+name: Build and Upload Artifacts
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '9.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build project
+        run: dotnet publish -c Release -o output
+
+      - name: Archive build files
+        run: |
+          short_commit_id=$(git rev-parse --short HEAD)
+          zip -r DQT-${short_commit_id}.zip output
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DQT-${{ github.sha }}
+          path: DQT-${{ github.sha }}.zip
