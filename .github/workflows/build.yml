@@ -28,33 +28,41 @@ jobs:
       - name: Build project
         run: dotnet publish -c Release -o output
 
+      - name: Get system architecture (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $arch = (wmic os get osarchitecture | select -Skip 1).Trim()
+          echo "Architecture: $arch" >> $GITHUB_ENV
+
+      - name: Get system architecture (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          arch=$(uname -m)
+          echo "Architecture: $arch" >> $GITHUB_ENV
+
       - name: Archive build files (Windows)
         if: runner.os == 'Windows'
         run: |
           $short_commit_id = (git rev-parse --short HEAD)
-          echo "Short commit ID: $short_commit_id"
-          Compress-Archive -Path output/* -DestinationPath DQT-$short_commit_id.zip
-
-      - name: Debugging - List ZIP files before uploading (Windows)
-        if: runner.os == 'Windows'
-        run: Get-ChildItem *.zip
+          $artifact_name = "DQT-windows-${{ env.Architecture }}-$short_commit_id.zip"
+          echo "Artifact name: $artifact_name"
+          Compress-Archive -Path output/* -DestinationPath $artifact_name
 
       - name: Archive build files (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
           short_commit_id=$(git rev-parse --short HEAD)
-          echo "Short commit ID: $short_commit_id"
-          zip -r DQT-${short_commit_id}.zip output
-          ls -l
+          artifact_name="DQT-${{ runner.os }}-${{ env.Architecture }}-$short_commit_id.zip"
+          echo "Artifact name: $artifact_name"
+          zip -r $artifact_name output
 
-      - name: Debugging - List ZIP files before uploading (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: ls -l *.zip
+      - name: Debugging - List ZIP files before uploading
+        run: ls -l *.zip || dir *.zip
 
-      - name: Upload all zip artifacts
+      - name: Upload all zip artifacts with system info
         uses: actions/upload-artifact@v4
         with:
-          name: DQT-artifacts
+          name: DQT-artifacts-${{ runner.os }}-${{ env.Architecture }}-${{ github.run_id }}
           path: ./*.zip
           if-no-files-found: warn
           compression-level: 6
