@@ -32,13 +32,16 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           $arch = (wmic os get osarchitecture | select -Skip 1).Trim()
-          echo "Architecture: $arch" >> $GITHUB_ENV
+          echo "Architecture=$arch" >> $GITHUB_ENV
 
       - name: Get system architecture (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
           arch=$(uname -m)
-          echo "Architecture: $arch" >> $GITHUB_ENV
+          echo "Architecture=$arch" >> $GITHUB_ENV
+
+      - name: Debugging - Print Architecture
+        run: echo "Architecture=${{ env.Architecture }}"
 
       - name: Archive build files (Windows)
         if: runner.os == 'Windows'
@@ -55,6 +58,7 @@ jobs:
           artifact_name="DQT-${{ runner.os }}-${{ env.Architecture }}-$short_commit_id.zip"
           echo "Artifact name: $artifact_name"
           zip -r $artifact_name output
+          ls -l
 
       - name: Debugging - List ZIP files before uploading
         run: ls -l *.zip || dir *.zip
