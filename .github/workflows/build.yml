@@ -28,13 +28,35 @@ jobs:
       - name: Build project
         run: dotnet publish -c Release -o output
 
-      - name: Archive build files
+      - name: Archive build files (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $short_commit_id = (git rev-parse --short HEAD)
+          echo "Short commit ID: $short_commit_id"
+          Compress-Archive -Path output/* -DestinationPath DQT-$short_commit_id.zip
+
+      - name: Debugging - List ZIP files before uploading (Windows)
+        if: runner.os == 'Windows'
+        run: Get-ChildItem *.zip
+
+      - name: Archive build files (Linux/macOS)
+        if: runner.os != 'Windows'
         run: |
           short_commit_id=$(git rev-parse --short HEAD)
+          echo "Short commit ID: $short_commit_id"
           zip -r DQT-${short_commit_id}.zip output
+          ls -l
 
-      - name: Upload artifact
+      - name: Debugging - List ZIP files before uploading (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: ls -l *.zip
+
+      - name: Upload all zip artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: DQT-${{ github.sha }}
-          path: DQT-${{ github.sha }}.zip
+          name: DQT-artifacts
+          path: ./*.zip
+          if-no-files-found: warn
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
