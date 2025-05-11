@@ -25,8 +25,17 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore
 
-      - name: Build project
-        run: dotnet publish -c Release -o output
+      - name: Build project (Windows)
+        if: runner.os == 'Windows'
+        run: dotnet publish -c Release -r win-x64 -o output --self-contained
+
+      - name: Build project (Linux)
+        if: runner.os == 'Linux'
+        run: dotnet publish -c Release -r linux-x64 -o output --self-contained
+
+      - name: Build project (macOS)
+        if: runner.os == 'macOS'
+        run: dotnet publish -c Release -r osx-x64 -o output --self-contained
 
       - name: Get system architecture (Windows)
         if: runner.os == 'Windows'
