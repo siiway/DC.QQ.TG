@@ -165,30 +165,8 @@ namespace DC.QQ.TG.Adapters
                 _logger.LogInformation("Discord bot client not initialized (no bot token provided)");
             }
 
-            // Check if we need to automatically manage webhooks
-            if (_autoWebhook && !string.IsNullOrEmpty(_botToken) && _channelId != 0)
-            {
-                try
-                {
-                    _logger.LogInformation("Attempting to manage Discord webhook...");
-                    var webhookUrl = await ManageWebhookAsync(_channelId, _webhookName);
-
-                    if (!string.IsNullOrEmpty(webhookUrl))
-                    {
-                        _webhookUrl = webhookUrl;
-                        _logger.LogInformation("Discord webhook managed successfully: {WebhookUrl}",
-                            webhookUrl.Substring(0, Math.Min(20, webhookUrl.Length)) + "...");
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Failed to manage Discord webhook");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error managing Discord webhook: {Message}", ex.Message);
-                }
-            }
+            // Webhook management will be handled in the ReadyAsync method
+            // after the Discord client is connected
 
             if (!string.IsNullOrEmpty(_webhookUrl))
             {
@@ -241,10 +219,34 @@ namespace DC.QQ.TG.Adapters
             return Task.CompletedTask;
         }
 
-        private Task ReadyAsync()
+        private async Task ReadyAsync()
         {
             _logger.LogInformation("Discord bot is connected and ready");
-            return Task.CompletedTask;
+
+            // Now that the bot is connected, we can try to manage webhooks if needed
+            if (_autoWebhook && _channelId != 0)
+            {
+                try
+                {
+                    _logger.LogInformation("Bot is ready, attempting to manage Discord webhook...");
+                    var webhookUrl = await ManageWebhookAsync(_channelId, _webhookName);
+
+                    if (!string.IsNullOrEmpty(webhookUrl))
+                    {
+                        _webhookUrl = webhookUrl;
+                        _logger.LogInformation("Discord webhook managed successfully: {WebhookUrl}",
+                            webhookUrl.Substring(0, Math.Min(20, webhookUrl.Length)) + "...");
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to manage Discord webhook");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error managing Discord webhook: {Message}", ex.Message);
+                }
+            }
         }
 
         private Task DisconnectedAsync(Exception ex)
