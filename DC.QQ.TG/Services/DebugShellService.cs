@@ -515,7 +515,7 @@ namespace DC.QQ.TG.Services
                 {
                     Id = Guid.NewGuid().ToString(),
                     Content = content,
-                    SenderName = "DebugShell",
+                    SenderName = "shell",
                     SenderId = "system",
                     Source = Models.MessageSource.System,
                     Timestamp = DateTime.Now

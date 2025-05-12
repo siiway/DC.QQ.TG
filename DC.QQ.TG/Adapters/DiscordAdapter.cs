@@ -149,7 +149,28 @@ namespace DC.QQ.TG.Adapters
                     _logger.LogInformation("Login successful, starting Discord client...");
                     await _discordClient.StartAsync();
 
-                    _logger.LogInformation("Discord bot client initialized and started");
+                    // Wait a bit for the connection to establish
+                    _logger.LogInformation("Waiting for Discord connection to establish...");
+                    int attempts = 0;
+                    while (_discordClient.ConnectionState != ConnectionState.Connected && attempts < 10)
+                    {
+                        await Task.Delay(1000);
+                        attempts++;
+                        _logger.LogInformation("Discord connection state after {Attempts} seconds: {ConnectionState}",
+                            attempts, _discordClient.ConnectionState);
+                    }
+
+                    if (_discordClient.ConnectionState == ConnectionState.Connected)
+                    {
+                        _logger.LogInformation("Discord bot client successfully connected");
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Discord bot client did not reach Connected state after {Attempts} seconds. Current state: {ConnectionState}",
+                            attempts, _discordClient.ConnectionState);
+                    }
+
+                    _logger.LogInformation("Discord bot client initialization completed");
                 }
                 catch (Exception ex)
                 {
@@ -222,7 +243,47 @@ namespace DC.QQ.TG.Adapters
 
         private async Task ReadyAsync()
         {
-            _logger.LogInformation("Discord bot is connected and ready");
+            _logger.LogInformation("Discord bot is connected and ready. Connection state: {ConnectionState}", _discordClient?.ConnectionState);
+
+            // Log some diagnostic information
+            if (_discordClient != null)
+            {
+                _logger.LogInformation("Discord client details - Latency: {Latency}ms, LoginState: {LoginState}, Status: {Status}",
+                    _discordClient.Latency, _discordClient.LoginState, _discordClient.Status);
+
+                if (_guildId != 0)
+                {
+                    var guild = _discordClient.GetGuild(_guildId);
+                    if (guild != null)
+                    {
+                        _logger.LogInformation("Connected to guild: {GuildName} (ID: {GuildId})", guild.Name, guild.Id);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Could not find guild with ID {GuildId}", _guildId);
+                    }
+                }
+
+                if (_channelId != 0)
+                {
+                    var channel = _discordClient.GetChannel(_channelId);
+                    if (channel != null)
+                    {
+                        string channelName;
+                        if (channel is ITextChannel textChannel)
+                            channelName = textChannel.Name;
+                        else if (channel is IVoiceChannel voiceChannel)
+                            channelName = voiceChannel.Name;
+                        else
+                            channelName = "unknown-channel-type";
+                        _logger.LogInformation("Target channel: {ChannelName} (ID: {ChannelId})", channelName, _channelId);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Could not find channel with ID {ChannelId}", _channelId);
+                    }
+                }
+            }
 
             // Now that the bot is connected, we can try to manage webhooks if needed
             if (_autoWebhook && _channelId != 0)
@@ -544,14 +605,48 @@ namespace DC.QQ.TG.Adapters
                     _logger.LogInformation("Message sent to Discord via webhook");
                 }
                 // Try to send via bot if available
-                else if (_discordClient != null && _discordClient.ConnectionState == ConnectionState.Connected)
+                else if (_discordClient != null)
                 {
+                    // Check connection state and log detailed information
+                    _logger.LogInformation("Discord client connection state: {ConnectionState}, LoginState: {LoginState}, Status: {Status}",
+                        _discordClient.ConnectionState, _discordClient.LoginState, _discordClient.Status);
+
+                    if (_discordClient.ConnectionState != ConnectionState.Connected)
+                    {
+                        _logger.LogWarning("Discord client is not in Connected state. Current state: {ConnectionState}", _discordClient.ConnectionState);
+
+                        // Try to reconnect if not connected
+                        if (_discordClient.ConnectionState == ConnectionState.Disconnected)
+                        {
+                            _logger.LogInformation("Attempting to reconnect Discord client...");
+                            try
+                            {
+                                // Try to reconnect
+                                await _discordClient.StartAsync();
+
+                                // Wait a bit for the connection to establish
+                                await Task.Delay(2000);
+
+                                _logger.LogInformation("Discord client reconnection attempt completed. New state: {ConnectionState}",
+                                    _discordClient.ConnectionState);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Failed to reconnect Discord client: {Message}", ex.Message);
+                            }
+                        }
+                    }
+
+                    // Try to send the message even if reconnection failed, as the state might have changed
                     // Try to get the channel
                     if (_channelId != 0)
                     {
                         var channel = _discordClient.GetChannel(_channelId) as IMessageChannel;
                         if (channel != null)
                         {
+                            _logger.LogInformation("Found Discord channel: {ChannelName} (ID: {ChannelId})",
+                                channel is ITextChannel textChannel ? textChannel.Name : "unknown-name", _channelId);
+
                             // Translate Discord mentions in the message content
                             string translatedContent = TranslateDiscordMentions(message.Content);
 
@@ -559,22 +654,49 @@ namespace DC.QQ.TG.Adapters
                             string formattedUsername = message.GetFormattedUsername();
                             string formattedContent = $"**{formattedUsername}**\n{translatedContent}";
 
-                            // Send the message
-                            if (!string.IsNullOrEmpty(message.ImageUrl))
+                            try
                             {
-                                // Create an embed with the image
-                                var embed = new EmbedBuilder()
-                                    .WithImageUrl(message.ImageUrl)
-                                    .Build();
+                                // Send the message
+                                if (!string.IsNullOrEmpty(message.ImageUrl))
+                                {
+                                    // Create an embed with the image
+                                    var embed = new EmbedBuilder()
+                                        .WithImageUrl(message.ImageUrl)
+                                        .Build();
 
-                                await channel.SendMessageAsync(text: formattedContent, embed: embed);
+                                    await channel.SendMessageAsync(text: formattedContent, embed: embed);
+                                }
+                                else
+                                {
+                                    await channel.SendMessageAsync(text: formattedContent);
+                                }
+
+                                _logger.LogInformation("Message sent to Discord via bot with formatted username");
                             }
-                            else
+                            catch (Exception ex)
                             {
-                                await channel.SendMessageAsync(text: formattedContent);
-                            }
+                                _logger.LogError(ex, "Failed to send message to Discord channel: {Message}", ex.Message);
 
-                            _logger.LogInformation("Message sent to Discord via bot with formatted username");
+                                // If we have a webhook URL as fallback, try to use it
+                                if (!string.IsNullOrEmpty(_webhookUrl))
+                                {
+                                    _logger.LogInformation("Falling back to webhook for message delivery");
+
+                                    // Get avatar URL
+                                    string avatarUrl = message.AvatarUrl ?? "https://avatars.githubusercontent.com/u/197464182";
+
+                                    // Create the webhook payload
+                                    var payload = new
+                                    {
+                                        content = translatedContent,
+                                        username = message.GetFormattedUsername(),
+                                        avatar_url = avatarUrl
+                                    };
+
+                                    await _httpClient.PostJsonAsync(_webhookUrl, payload);
+                                    _logger.LogInformation("Message sent to Discord via webhook (fallback)");
+                                }
+                            }
                         }
                         else
                         {
@@ -588,7 +710,7 @@ namespace DC.QQ.TG.Adapters
                 }
                 else
                 {
-                    _logger.LogWarning("Cannot send message to Discord: No webhook URL or connected bot available");
+                    _logger.LogWarning("Cannot send message to Discord: No webhook URL or Discord client available");
                 }
             }
             catch (Exception ex)
