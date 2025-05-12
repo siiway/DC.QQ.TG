@@ -383,9 +383,10 @@ namespace DC.QQ.TG.Adapters
                     }
 
                     // Create the webhook payload with sender's formatted name and avatar
+                    // For webhook, we use the original content without special formatting
                     var payload = new
                     {
-                        content = content,
+                        content = message.Content, // Use original content without special formatting
                         username = message.GetFormattedUsername(), // Use the formatted username: <user>@<platform>
                         avatar_url = avatarUrl // Use sender's avatar or default
                     };
@@ -395,7 +396,7 @@ namespace DC.QQ.TG.Adapters
                     {
                         var payloadWithEmbed = new
                         {
-                            content = content,
+                            content = message.Content, // Use original content without special formatting
                             username = message.GetFormattedUsername(), // Use the formatted username: <user>@<platform>
                             avatar_url = avatarUrl, // Use the same avatar URL as in the regular payload
                             embeds = new[]
@@ -427,6 +428,10 @@ namespace DC.QQ.TG.Adapters
                         var channel = _discordClient.GetChannel(_channelId) as IMessageChannel;
                         if (channel != null)
                         {
+                            // Format the message according to the requested format: **<user>@<platform>**\n<msg>
+                            string formattedUsername = message.GetFormattedUsername();
+                            string formattedContent = $"**{formattedUsername}**\n{message.Content}";
+
                             // Send the message
                             if (!string.IsNullOrEmpty(message.ImageUrl))
                             {
@@ -435,14 +440,14 @@ namespace DC.QQ.TG.Adapters
                                     .WithImageUrl(message.ImageUrl)
                                     .Build();
 
-                                await channel.SendMessageAsync(text: content, embed: embed);
+                                await channel.SendMessageAsync(text: formattedContent, embed: embed);
                             }
                             else
                             {
-                                await channel.SendMessageAsync(text: content);
+                                await channel.SendMessageAsync(text: formattedContent);
                             }
 
-                            _logger.LogInformation("Message sent to Discord via bot");
+                            _logger.LogInformation("Message sent to Discord via bot with formatted username");
                         }
                         else
                         {
