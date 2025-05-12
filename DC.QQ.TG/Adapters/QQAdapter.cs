@@ -30,6 +30,7 @@ namespace DC.QQ.TG.Adapters
         private Task? _receiveTask;
         private Task? _sendTask;
         private bool _useWebSocket;
+        private readonly Dictionary<string, TaskCompletionSource<string>> _pendingRequests = new Dictionary<string, TaskCompletionSource<string>>();
 
         public MessageSource Platform => MessageSource.QQ;
 
@@ -261,6 +262,69 @@ namespace DC.QQ.TG.Adapters
                         _groupId, qqMessage.Content);
 
                     MessageReceived?.Invoke(this, qqMessage);
+                }
+                // Check if this is a response to get_stranger_info
+                else if (response["echo"]?.ToString()?.StartsWith("get_stranger_info_") == true)
+                {
+                    // Check if we should show NapCat responses
+                    bool showNapCatResponse = _configuration["Debug:ShowNapCatResponse"]?.ToLower() == "true";
+
+                    if (showNapCatResponse)
+                    {
+                        _logger.LogInformation("NapCat WebSocket Response for get_stranger_info: {Response}",
+                            response.ToString(Formatting.Indented));
+                    }
+
+                    string echoId = response["echo"]?.ToString() ?? "";
+
+                    // Process the response and complete the corresponding TaskCompletionSource
+                    if (response["status"]?.ToString() == "ok" && response["data"] is JObject data)
+                    {
+                        // Get the nickname from the response
+                        string nickname = data["nickname"]?.ToString() ?? "";
+
+                        if (string.IsNullOrEmpty(nickname))
+                        {
+                            // If nickname is empty, extract the user ID from the echo ID
+                            string userId = echoId.Replace("get_stranger_info_", "").Split('_')[0];
+                            nickname = userId; // Fall back to user ID
+                            _logger.LogWarning("No nickname found in WebSocket response for echo ID {EchoId}", echoId);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("Found nickname in WebSocket response for echo ID {EchoId}: {Nickname}", echoId, nickname);
+                        }
+
+                        // Complete the TaskCompletionSource with the nickname
+                        lock (_pendingRequests)
+                        {
+                            if (_pendingRequests.TryGetValue(echoId, out var tcs))
+                            {
+                                tcs.TrySetResult(nickname);
+                                _logger.LogDebug("Completed TaskCompletionSource for echo ID {EchoId} with nickname {Nickname}", echoId, nickname);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("No pending request found for echo ID {EchoId}", echoId);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Error in WebSocket response for echo ID {EchoId}: {Status}",
+                            echoId, response["status"]?.ToString() ?? "unknown");
+
+                        // Complete the TaskCompletionSource with the user ID (fallback)
+                        lock (_pendingRequests)
+                        {
+                            if (_pendingRequests.TryGetValue(echoId, out var tcs))
+                            {
+                                string userId = echoId.Replace("get_stranger_info_", "").Split('_')[0];
+                                tcs.TrySetResult(userId);
+                                _logger.LogDebug("Completed TaskCompletionSource for echo ID {EchoId} with user ID {UserId} (fallback)", echoId, userId);
+                            }
+                        }
+                    }
                 }
                 // Check if this is a response to get_group_list
                 else if (response["data"] != null && response["status"]?.ToString() == "ok")
@@ -550,121 +614,108 @@ namespace DC.QQ.TG.Adapters
             {
                 _logger.LogDebug("Getting nickname for QQ user {UserId}", userId);
 
-                if (_useWebSocket && _webSocket?.State == WebSocketState.Open)
+                try
                 {
-                    // For WebSocket, we need to use get_group_member_info
-                    var tcs = new TaskCompletionSource<string>();
-
-                    // Create a unique echo ID for this request
-                    string echoId = $"get_member_info_{userId}_{DateTime.Now.Ticks}";
-
-                    // Set up a one-time event handler to process the response
-                    EventHandler<string> responseHandler = null;
-                    responseHandler = async (sender, message) =>
+                    // First try WebSocket if available
+                    if (_useWebSocket && _webSocket?.State == WebSocketState.Open)
                     {
-                        try
-                        {
-                            var response = JObject.Parse(message);
+                        _logger.LogInformation("Getting nickname for QQ user {UserId} via WebSocket", userId);
 
-                            // Check if this is the response we're waiting for
-                            if (response["echo"]?.ToString() == echoId && response["status"]?.ToString() == "ok")
+                        // Create a unique echo ID for this request
+                        string echoId = $"get_stranger_info_{userId}_{DateTime.Now.Ticks}";
+
+                        // Create a TaskCompletionSource to wait for the response
+                        var tcs = new TaskCompletionSource<string>();
+
+                        // Create a cancellation token source with a timeout
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+                        // Register a callback to handle cancellation
+                        cts.Token.Register(() =>
+                        {
+                            tcs.TrySetResult(userId); // Fall back to user ID on timeout
+                            _logger.LogWarning("Timeout waiting for WebSocket response for QQ user {UserId}", userId);
+                        }, useSynchronizationContext: false);
+
+                        // Store the TaskCompletionSource in a dictionary to be completed when the response arrives
+                        lock (_pendingRequests)
+                        {
+                            _pendingRequests[echoId] = tcs;
+                        }
+
+                        // Send the WebSocket request
+                        await SendWebSocketCommandAsync(new
+                        {
+                            action = "get_stranger_info",
+                            echo = echoId,
+                            @params = new
                             {
-                                string nickname = "Unknown";
-
-                                // Try to get the card (group nickname) first, then fall back to nickname
-                                if (response["data"] is JObject data)
-                                {
-                                    nickname = data["card"]?.ToString() ?? "";
-                                    if (string.IsNullOrEmpty(nickname))
-                                    {
-                                        nickname = data["nickname"]?.ToString() ?? "";
-                                    }
-                                }
-
-                                if (string.IsNullOrEmpty(nickname) || nickname == "Unknown")
-                                {
-                                    nickname = userId; // Fall back to user ID
-                                }
-
-                                tcs.TrySetResult(nickname);
-
-                                // Remove the event handler
-                                if (_webSocket != null)
-                                {
-                                    // We would need to remove the event handler here
-                                    // But since we're using a custom event handling mechanism, we'll handle it differently
-                                }
+                                user_id = userId,
+                                no_cache = true
                             }
-                        }
-                        catch (Exception ex)
+                        });
+
+                        _logger.LogDebug("WebSocket request sent for QQ user {UserId} with echo ID {EchoId}", userId, echoId);
+
+                        // Wait for the response or timeout
+                        string nickname = await tcs.Task;
+
+                        // Remove the TaskCompletionSource from the dictionary
+                        lock (_pendingRequests)
                         {
-                            _logger.LogError(ex, "Error processing WebSocket response for user nickname");
-                            tcs.TrySetResult(userId); // Fall back to user ID
+                            _pendingRequests.Remove(echoId);
                         }
-                    };
 
-                    // Send the request
-                    await SendWebSocketCommandAsync(new
-                    {
-                        action = "get_group_member_info",
-                        echo = echoId,
-                        @params = new
+                        if (nickname != userId)
                         {
-                            group_id = _groupId,
-                            user_id = userId,
-                            no_cache = true
+                            _logger.LogInformation("Found nickname for QQ user {UserId} via WebSocket: {Nickname}", userId, nickname);
+                            return nickname;
                         }
-                    });
 
-                    // Wait for the response with a timeout
-                    var timeoutTask = Task.Delay(3000); // 3 second timeout
-                    var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
-
-                    if (completedTask == timeoutTask)
-                    {
-                        _logger.LogWarning("Timeout getting nickname for QQ user {UserId}", userId);
-                        return userId; // Fall back to user ID
+                        _logger.LogWarning("Failed to get nickname for QQ user {UserId} via WebSocket, falling back to HTTP", userId);
                     }
 
-                    return await tcs.Task;
-                }
-                else
-                {
-                    // For HTTP, we can use get_group_member_info
-                    var response = await _httpClient.PostJsonAsync<JObject>("/get_group_member_info", new
+                    // Fall back to HTTP if WebSocket is not available or failed
+                    _logger.LogInformation("Getting nickname for QQ user {UserId} via HTTP API", userId);
+
+                    var response = await _httpClient.PostJsonAsync<JObject>("/get_stranger_info", new
                     {
-                        group_id = _groupId,
                         user_id = userId,
                         no_cache = true
                     });
 
-                    // Check if we should show NapCat responses
-                    bool showNapCatResponse = _configuration["Debug:ShowNapCatResponse"]?.ToLower() == "true";
-                    if (showNapCatResponse)
-                    {
-                        _logger.LogInformation("NapCat API User Info Response: {Response}",
-                            response.ToString(Formatting.Indented));
-                    }
+                    // Always show the API response for debugging
+                    _logger.LogInformation("NapCat API User Info Response for user {UserId}: {Response}",
+                        userId, response.ToString(Formatting.Indented));
 
                     if (response["status"]?.ToString() == "ok" && response["data"] is JObject data)
                     {
-                        // Try to get the card (group nickname) first, then fall back to nickname
-                        string nickname = data["card"]?.ToString() ?? "";
-                        if (string.IsNullOrEmpty(nickname))
-                        {
-                            nickname = data["nickname"]?.ToString() ?? "";
-                        }
+                        // Get the nickname from the response
+                        string nickname = data["nickname"]?.ToString() ?? "";
 
                         if (!string.IsNullOrEmpty(nickname))
                         {
-                            _logger.LogDebug("Found nickname for QQ user {UserId}: {Nickname}", userId, nickname);
+                            _logger.LogInformation("Found nickname for QQ user {UserId}: {Nickname}", userId, nickname);
                             return nickname;
                         }
+                        else
+                        {
+                            _logger.LogWarning("No nickname found in API response for QQ user {UserId}", userId);
+                        }
                     }
-
-                    _logger.LogWarning("Failed to get nickname for QQ user {UserId}", userId);
-                    return userId; // Fall back to user ID
+                    else
+                    {
+                        _logger.LogWarning("API returned error or invalid data for QQ user {UserId}: {Status}",
+                            userId, response["status"]?.ToString() ?? "unknown");
+                    }
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error getting nickname for QQ user {UserId}: {Message}", userId, ex.Message);
+                }
+
+                _logger.LogWarning("Falling back to user ID for QQ user {UserId}", userId);
+                return userId; // Fall back to user ID
             }
             catch (Exception ex)
             {
@@ -682,13 +733,20 @@ namespace DC.QQ.TG.Adapters
         {
             try
             {
+                _logger.LogInformation("Checking for QQ user placeholders in content: {Content}", content);
+
                 // Use regex to find all placeholders in the format @__QQ_USER_123456__
                 var regex = new System.Text.RegularExpressions.Regex(@"@__QQ_USER_(\d+)__");
                 var matches = regex.Matches(content);
 
                 // If no placeholders found, return the original content
                 if (matches.Count == 0)
+                {
+                    _logger.LogInformation("No QQ user placeholders found in content");
                     return content;
+                }
+
+                _logger.LogInformation("Found {Count} QQ user placeholders in content", matches.Count);
 
                 // Create a copy of the content that we'll modify
                 string result = content;
@@ -698,16 +756,21 @@ namespace DC.QQ.TG.Adapters
                 {
                     // Extract the QQ ID
                     string qqId = match.Groups[1].Value;
+                    _logger.LogInformation("Processing placeholder for QQ user {QQId}", qqId);
 
                     // Get the nickname for this QQ ID
                     string nickname = await GetQQUserNicknameAsync(qqId);
 
                     // Replace the placeholder with the nickname
-                    result = result.Replace(match.Value, $"@{nickname}");
+                    string oldText = match.Value;
+                    string newText = $"@{nickname}";
+                    result = result.Replace(oldText, newText);
 
-                    _logger.LogDebug("Replaced placeholder for QQ user {QQId} with nickname {Nickname}", qqId, nickname);
+                    _logger.LogInformation("Replaced placeholder '{OldText}' with '{NewText}' for QQ user {QQId}",
+                        oldText, newText, qqId);
                 }
 
+                _logger.LogInformation("Final content after replacing placeholders: {Content}", result);
                 return result;
             }
             catch (Exception ex)
@@ -771,23 +834,13 @@ namespace DC.QQ.TG.Adapters
                                     {
                                         string qqId = part["data"]?["qq"]?.ToString() ?? "someone";
 
-                                        // First try to get the nickname from the data if available
-                                        string nickname = part["data"]?["name"]?.ToString() ?? "";
+                                        // Always use a placeholder for @ mentions to ensure we get the most up-to-date nickname
+                                        string placeholder = $"@__QQ_USER_{qqId}__";
+                                        contentBuilder.Append(placeholder);
+                                        _logger.LogInformation("Added placeholder for QQ user {QQId}: {Placeholder}", qqId, placeholder);
 
-                                        // If nickname is available in the data, use it
-                                        if (!string.IsNullOrEmpty(nickname))
-                                        {
-                                            _logger.LogDebug("Using nickname from message data for QQ user {QQId}: {Nickname}", qqId, nickname);
-                                            contentBuilder.Append($"@{nickname} ");
-                                        }
-                                        else
-                                        {
-                                            // If nickname is not available in the data, we'll use the QQ ID for now
-                                            // and add a placeholder that will be replaced later
-                                            string placeholder = $"@__QQ_USER_{qqId}__";
-                                            contentBuilder.Append(placeholder);
-                                            _logger.LogDebug("Added placeholder for QQ user {QQId}: {Placeholder}", qqId, placeholder);
-                                        }
+                                        // Add a space after the mention
+                                        contentBuilder.Append(" ");
                                     }
                                     break;
 
