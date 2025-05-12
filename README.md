@@ -92,8 +92,9 @@ You can use either Discord Bot API or Webhook for Discord integration:
      - Set `--auto-webhook=true` in the command line arguments
      - Optionally set `--discord-webhook-name` to customize the webhook name
      - The app will create a webhook or move an existing one to the correct channel
+
 > [!NOTE]
-> Auto-Webhook feature is enabled by default. If you provide a webhook URL in the configuration, it will be used and auto-webhook will be disabled.
+> If you use `dotnet run` to run the application, Auto-Webhook feature is enabled by default. If you provide a webhook URL in the configuration, it will be used and auto-webhook will be disabled.
 
 ### Telegram Setup
 
