@@ -63,9 +63,19 @@ You can use either Discord Bot API or Webhook for Discord integration:
 #### Discord Bot API (Recommended for bidirectional messaging)
 1. Create a Discord application at [Discord Developer Portal](https://discord.com/developers/applications)
 2. Create a bot for your application
-3. Enable the "Message Content Intent" under the Bot settings
+3. Enable the following Intents under the Bot settings:
+   - MESSAGE CONTENT INTENT
+   - SERVER MEMBERS INTENT
+   - PRESENCE INTENT
 4. Copy the bot token and set it in the configuration
-5. Invite the bot to your server using the OAuth2 URL generator
+5. Invite the bot to your server using the OAuth2 URL generator with the following permissions:
+   - Read Messages/View Channels
+   - Send Messages
+   - Embed Links
+   - Attach Files
+   - Read Message History
+   - Use External Emojis
+   - Add Reactions
 6. Get your Guild ID (server ID) and Channel ID and set them in the configuration
 
 #### Discord Webhook (One-way messaging to Discord only)

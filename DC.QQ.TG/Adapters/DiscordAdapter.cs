@@ -97,7 +97,9 @@ namespace DC.QQ.TG.Adapters
                         GatewayIntents = GatewayIntents.MessageContent |
                                         GatewayIntents.GuildMessages |
                                         GatewayIntents.Guilds |
-                                        GatewayIntents.DirectMessages,
+                                        GatewayIntents.DirectMessages |
+                                        GatewayIntents.GuildMembers |  // Add GuildMembers intent
+                                        GatewayIntents.GuildPresences, // Add GuildPresences intent for completeness
                         AlwaysDownloadUsers = true,
                         LogLevel = LogSeverity.Debug, // Set to Debug for more detailed logs
                         UseSystemClock = true
@@ -106,7 +108,8 @@ namespace DC.QQ.TG.Adapters
                     _discordClient = new DiscordSocketClient(config);
 
                     _logger.LogInformation("Discord client created with intents: {Intents}",
-                        GatewayIntents.MessageContent | GatewayIntents.GuildMessages | GatewayIntents.Guilds | GatewayIntents.DirectMessages);
+                        GatewayIntents.MessageContent | GatewayIntents.GuildMessages | GatewayIntents.Guilds |
+                        GatewayIntents.DirectMessages | GatewayIntents.GuildMembers | GatewayIntents.GuildPresences);
 
                     // Set up event handlers
                     _discordClient.Log += LogAsync;
