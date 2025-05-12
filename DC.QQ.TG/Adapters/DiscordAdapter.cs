@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using DC.QQ.TG.Utils;
 using Discord;
+using Discord.Rest;
 using Discord.WebSocket;
 using MessageSource = DC.QQ.TG.Models.MessageSource;
 
@@ -263,6 +264,121 @@ namespace DC.QQ.TG.Adapters
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Translates Discord mentions (channels, users, roles) to readable names
+        /// </summary>
+        /// <param name="content">The message content that may contain Discord mentions</param>
+        /// <returns>The content with mentions replaced by readable names</returns>
+        private string TranslateDiscordMentions(string content)
+        {
+            if (_discordClient == null || string.IsNullOrEmpty(content))
+            {
+                return content;
+            }
+
+            // Step 1: Translate channel mentions <#123456789012345678> to #channel-name
+            var channelRegex = new System.Text.RegularExpressions.Regex(@"<#(\d+)>");
+            content = channelRegex.Replace(content, match =>
+            {
+                // Extract the channel ID
+                if (ulong.TryParse(match.Groups[1].Value, out ulong channelId))
+                {
+                    // Try to get the channel
+                    var channel = _discordClient.GetChannel(channelId);
+
+                    // If channel is found, return its name, otherwise return the original code
+                    if (channel != null)
+                    {
+                        // Different channel types have different ways to get the name
+                        string channelName;
+
+                        if (channel is ITextChannel textChannel)
+                            channelName = textChannel.Name;
+                        else if (channel is IVoiceChannel voiceChannel)
+                            channelName = voiceChannel.Name;
+                        else if (channel is ICategoryChannel categoryChannel)
+                            channelName = categoryChannel.Name;
+                        else if (channel is IThreadChannel threadChannel)
+                            channelName = threadChannel.Name;
+                        else if (channel is IDMChannel)
+                            channelName = "DM";
+                        else if (channel is IGroupChannel groupChannel)
+                            channelName = groupChannel.Name;
+                        else
+                            channelName = "unknown-channel";
+
+                        return $"#{channelName}";
+                    }
+                }
+
+                // If channel not found or ID parsing failed, return the original code
+                return match.Value;
+            });
+
+            // Step 2: Translate user mentions <@123456789012345678> to @username
+            var userRegex = new System.Text.RegularExpressions.Regex(@"<@!?(\d+)>");
+            content = userRegex.Replace(content, match =>
+            {
+                // Extract the user ID
+                if (ulong.TryParse(match.Groups[1].Value, out ulong userId))
+                {
+                    // Try to get the user
+                    var user = _discordClient.GetUser(userId);
+
+                    // If user is found, return their username, otherwise return the original code
+                    if (user != null)
+                    {
+                        return $"@{user.Username}";
+                    }
+
+                    // If user not found in cache, try to get them from the guild
+                    if (_guildId != 0)
+                    {
+                        var guild = _discordClient.GetGuild(_guildId);
+                        if (guild != null)
+                        {
+                            var guildUser = guild.GetUser(userId);
+                            if (guildUser != null)
+                            {
+                                return $"@{guildUser.Username}";
+                            }
+                        }
+                    }
+                }
+
+                // If user not found or ID parsing failed, return the original code
+                return match.Value;
+            });
+
+            // Step 3: Translate role mentions <@&123456789012345678> to @role-name
+            var roleRegex = new System.Text.RegularExpressions.Regex(@"<@&(\d+)>");
+            content = roleRegex.Replace(content, match =>
+            {
+                // Extract the role ID
+                if (ulong.TryParse(match.Groups[1].Value, out ulong roleId))
+                {
+                    // Roles are guild-specific, so we need a guild
+                    if (_guildId != 0)
+                    {
+                        var guild = _discordClient.GetGuild(_guildId);
+                        if (guild != null)
+                        {
+                            var role = guild.GetRole(roleId);
+                            if (role != null)
+                            {
+                                return $"@{role.Name}";
+                            }
+                        }
+                    }
+                }
+
+                // If role not found or ID parsing failed, return the original code
+                return match.Value;
+            });
+
+            return content;
+        }
+
         private Task DiscordMessageReceivedAsync(SocketMessage message)
         {
             // Ignore system messages and messages from bots
@@ -315,10 +431,13 @@ namespace DC.QQ.TG.Adapters
                 avatarUrl = "https://avatars.githubusercontent.com/u/197464182";
             }
 
+            // Translate Discord mentions in the message content
+            string translatedContent = TranslateDiscordMentions(userMessage.Content);
+
             var crossPlatformMessage = new Message
             {
                 Id = userMessage.Id.ToString(),
-                Content = userMessage.Content,
+                Content = translatedContent,
                 SenderName = userMessage.Author.Username,
                 SenderId = userMessage.Author.Id.ToString(),
                 Source = MessageSource.Discord,
@@ -384,11 +503,14 @@ namespace DC.QQ.TG.Adapters
                         _logger.LogWarning("No avatar URL provided for sender. Using default avatar.");
                     }
 
+                    // Translate Discord mentions in the message content
+                    string translatedContent = TranslateDiscordMentions(message.Content);
+
                     // Create the webhook payload with sender's formatted name and avatar
                     // For webhook, we use the original content without special formatting
                     var payload = new
                     {
-                        content = message.Content, // Use original content without special formatting
+                        content = translatedContent, // Use translated content without special formatting
                         username = message.GetFormattedUsername(), // Use the formatted username: <user>@<platform>
                         avatar_url = avatarUrl // Use sender's avatar or default
                     };
@@ -398,7 +520,7 @@ namespace DC.QQ.TG.Adapters
                     {
                         var payloadWithEmbed = new
                         {
-                            content = message.Content, // Use original content without special formatting
+                            content = translatedContent, // Use translated content without special formatting
                             username = message.GetFormattedUsername(), // Use the formatted username: <user>@<platform>
                             avatar_url = avatarUrl, // Use the same avatar URL as in the regular payload
                             embeds = new[]
@@ -430,9 +552,12 @@ namespace DC.QQ.TG.Adapters
                         var channel = _discordClient.GetChannel(_channelId) as IMessageChannel;
                         if (channel != null)
                         {
+                            // Translate Discord mentions in the message content
+                            string translatedContent = TranslateDiscordMentions(message.Content);
+
                             // Format the message according to the requested format: **<user>@<platform>**\n<msg>
                             string formattedUsername = message.GetFormattedUsername();
-                            string formattedContent = $"**{formattedUsername}**\n{message.Content}";
+                            string formattedContent = $"**{formattedUsername}**\n{translatedContent}";
 
                             // Send the message
                             if (!string.IsNullOrEmpty(message.ImageUrl))
