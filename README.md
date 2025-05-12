@@ -76,14 +76,24 @@ You can use either Discord Bot API or Webhook for Discord integration:
    - Read Message History
    - Use External Emojis
    - Add Reactions
+   - Manage Webhooks
 6. Get your Guild ID (server ID) and Channel ID and set them in the configuration
 
 #### Discord Webhook (One-way messaging to Discord only)
 1. Create a Discord server or use an existing one
-2. Create a webhook in a channel:
-   - Go to Server Settings > Integrations > Webhooks
-   - Click "New Webhook"
-   - Copy the webhook URL and set it in the configuration
+2. You can either:
+   - **Manually create a webhook in the correct channel**:
+     - Go to Server Settings > Integrations > Webhooks
+     - Click "New Webhook"
+     - Select the channel where you want to receive messages
+     - Copy the webhook URL and set it in the configuration
+   - **Let the application manage webhooks automatically**:
+     - Set up the Discord Bot API as described above
+     - Set `--auto-webhook=true` in the command line arguments
+     - Optionally set `--discord-webhook-name` to customize the webhook name
+     - The app will create a webhook or move an existing one to the correct channel
+   - > [!NOTE]
+     > Auto-Webhook feature is enabled by default. If you provide a webhook URL in the configuration, it will be used and auto-webhook will be disabled.
 
 ### Telegram Setup
 
@@ -121,6 +131,8 @@ All parameters are required for their respective platforms. The application will
 - `--discord-guild-id`: Your Discord server (guild) ID
 - `--discord-channel-id`: Your Discord channel ID
 - `--discord-use-proxy`: Whether to use system proxy for Discord connection (true/false)
+- `--auto-webhook`: Whether to automatically manage webhooks (create or move to correct channel) (true/false, default: true, automatically disabled if webhook URL is provided)
+- `--discord-webhook-name`: The name for the automatically managed webhook (default: "Cross-Platform Messenger")
 
 #### Telegram Parameters:
 - `--telegram-bot-token`: Your Telegram bot token

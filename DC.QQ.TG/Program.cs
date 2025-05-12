@@ -35,6 +35,8 @@ namespace DC.QQ.TG
                 { "--discord-guild-id", "Discord:GuildId" },
                 { "--discord-channel-id", "Discord:ChannelId" },
                 { "--discord-use-proxy", "Discord:UseProxy" },
+                { "--auto-webhook", "Discord:AutoWebhook" },
+                { "--discord-webhook-name", "Discord:WebhookName" },
 
                 // Telegram parameters
                 { "--telegram-token", "Telegram:BotToken" },

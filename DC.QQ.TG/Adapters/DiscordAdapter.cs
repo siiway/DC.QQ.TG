@@ -27,6 +27,8 @@ namespace DC.QQ.TG.Adapters
         private DiscordSocketClient? _discordClient;
         private CancellationTokenSource? _cts;
         private readonly bool _isListening;
+        private bool _autoWebhook;
+        private string _webhookName;
 
         public MessageSource Platform => MessageSource.Discord;
 
@@ -46,6 +48,26 @@ namespace DC.QQ.TG.Adapters
 
             // Get bot token and channel ID for receiving messages
             _botToken = _configuration["Discord:BotToken"];
+
+            // Get webhook name
+            _webhookName = _configuration["Discord:WebhookName"] ?? "Cross-Platform Messenger";
+
+            // Check if we should automatically manage webhooks
+            // Default is true, but if webhook URL is already provided, set to false
+            bool autoWebhookSetting = _configuration["Discord:AutoWebhook"]?.ToLower() == "true";
+
+            if (!string.IsNullOrEmpty(_webhookUrl))
+            {
+                // User has provided a webhook URL, so disable auto-webhook
+                _autoWebhook = false;
+                _logger.LogInformation("Webhook URL provided, disabling auto-webhook feature");
+            }
+            else
+            {
+                // Use the setting from configuration
+                _autoWebhook = autoWebhookSetting;
+                _logger.LogInformation("Auto-webhook is {Status}", _autoWebhook ? "enabled" : "disabled");
+            }
 
             // Try to parse guild ID and channel ID
             if (!ulong.TryParse(_configuration["Discord:GuildId"], out _guildId))
@@ -141,6 +163,31 @@ namespace DC.QQ.TG.Adapters
             else
             {
                 _logger.LogInformation("Discord bot client not initialized (no bot token provided)");
+            }
+
+            // Check if we need to automatically manage webhooks
+            if (_autoWebhook && !string.IsNullOrEmpty(_botToken) && _channelId != 0)
+            {
+                try
+                {
+                    _logger.LogInformation("Attempting to manage Discord webhook...");
+                    var webhookUrl = await ManageWebhookAsync(_channelId, _webhookName);
+
+                    if (!string.IsNullOrEmpty(webhookUrl))
+                    {
+                        _webhookUrl = webhookUrl;
+                        _logger.LogInformation("Discord webhook managed successfully: {WebhookUrl}",
+                            webhookUrl.Substring(0, Math.Min(20, webhookUrl.Length)) + "...");
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to manage Discord webhook");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error managing Discord webhook: {Message}", ex.Message);
+                }
             }
 
             if (!string.IsNullOrEmpty(_webhookUrl))
@@ -463,6 +510,118 @@ namespace DC.QQ.TG.Adapters
             }
 
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Manages webhooks - creates, updates, or reuses existing webhooks
+        /// </summary>
+        /// <param name="channelId">The Discord channel ID</param>
+        /// <param name="name">The name for the webhook</param>
+        /// <returns>The webhook URL if successful, null otherwise</returns>
+        private async Task<string?> ManageWebhookAsync(ulong channelId, string name)
+        {
+            if (_discordClient == null || _discordClient.ConnectionState != ConnectionState.Connected)
+            {
+                _logger.LogWarning("Cannot manage webhook: Discord client is not connected");
+                return null;
+            }
+
+            try
+            {
+                // Get the target channel
+                var targetChannel = _discordClient.GetChannel(channelId);
+
+                if (targetChannel is not ITextChannel targetTextChannel)
+                {
+                    _logger.LogWarning("Cannot manage webhook: Channel {ChannelId} is not a text channel", channelId);
+                    return null;
+                }
+
+                // First, check if a webhook with this name already exists in any channel
+                bool foundInWrongChannel = false;
+                IWebhook? existingWebhook = null;
+                ITextChannel? existingChannel = null;
+
+                // Get all guild channels
+                var guild = _discordClient.GetGuild(_guildId);
+                if (guild == null)
+                {
+                    _logger.LogWarning("Cannot manage webhook: Guild {GuildId} not found", _guildId);
+                    return null;
+                }
+
+                // Check each text channel for webhooks with our name
+                foreach (var channel in guild.TextChannels)
+                {
+                    var webhooks = await channel.GetWebhooksAsync();
+                    var webhook = webhooks.FirstOrDefault(w => w.Name == name);
+
+                    if (webhook != null)
+                    {
+                        existingWebhook = webhook;
+                        existingChannel = channel;
+
+                        // If the webhook is in the wrong channel, we'll need to move it
+                        if (channel.Id != channelId)
+                        {
+                            foundInWrongChannel = true;
+                            _logger.LogInformation("Found webhook '{Name}' in channel {ChannelName}, but it needs to be in {TargetChannelName}",
+                                name, channel.Name, targetTextChannel.Name);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("Webhook with name '{Name}' already exists in the correct channel, using existing webhook", name);
+                            return $"https://discord.com/api/webhooks/{webhook.Id}/{webhook.Token}";
+                        }
+
+                        break;
+                    }
+                }
+
+                // If we found the webhook in the wrong channel, try to modify it
+                if (foundInWrongChannel && existingWebhook != null)
+                {
+                    try
+                    {
+                        // Try to modify the webhook to point to the new channel
+                        // Note: This requires the MANAGE_WEBHOOKS permission
+                        await existingWebhook.ModifyAsync(props =>
+                        {
+                            props.ChannelId = channelId;
+                        }, new RequestOptions
+                        {
+                            AuditLogReason = "Updated by Cross-Platform Messenger to point to the correct channel"
+                        });
+
+                        _logger.LogInformation("Successfully moved webhook '{Name}' from channel {OldChannelName} to {NewChannelName}",
+                            name, existingChannel?.Name ?? "unknown", targetTextChannel.Name);
+
+                        return $"https://discord.com/api/webhooks/{existingWebhook.Id}/{existingWebhook.Token}";
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to move webhook to the correct channel. Will try to create a new one.");
+                        // Continue to create a new webhook
+                    }
+                }
+
+                // If we didn't find a webhook or couldn't move it, create a new one
+                var newWebhook = await targetTextChannel.CreateWebhookAsync(name, options: new RequestOptions
+                {
+                    AuditLogReason = "Created by Cross-Platform Messenger"
+                });
+
+                _logger.LogInformation("Created new webhook with name '{Name}' in channel {ChannelName}",
+                    name, targetTextChannel.Name);
+
+                // Construct the webhook URL
+                return $"https://discord.com/api/webhooks/{newWebhook.Id}/{newWebhook.Token}";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error managing webhook: {Message}", ex.Message);
+                return null;
+            }
         }
     }
 }
