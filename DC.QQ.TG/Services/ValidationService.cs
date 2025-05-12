@@ -107,11 +107,24 @@ namespace DC.QQ.TG.Services
         private async Task<bool> ValidateDiscordWebhookAsync()
         {
             var webhookUrl = _configuration["Discord:WebhookUrl"];
+            var botToken = _configuration["Discord:BotToken"];
+            var autoWebhook = _configuration["Discord:AutoWebhook"]?.ToLower() == "true";
 
+            // If webhook URL is missing but auto-webhook is enabled and bot token is provided,
+            // we'll create a webhook later, so validation passes
             if (string.IsNullOrEmpty(webhookUrl))
             {
-                _logger.LogError("Discord webhook URL is missing");
-                return false;
+                if (autoWebhook && !string.IsNullOrEmpty(botToken))
+                {
+                    _logger.LogInformation("Discord webhook URL is missing, but auto-webhook is enabled and bot token is provided");
+                    _logger.LogInformation("A webhook will be created automatically during initialization");
+                    return true;
+                }
+                else
+                {
+                    _logger.LogError("Discord webhook URL is missing and auto-webhook is not enabled or bot token is missing");
+                    return false;
+                }
             }
 
             try
@@ -135,12 +148,32 @@ namespace DC.QQ.TG.Services
                     {
                         _logger.LogDebug("Discord webhook error response: {Content}", content);
                     }
+
+                    // If webhook validation failed but auto-webhook is enabled and bot token is provided,
+                    // we'll create a new webhook later, so validation passes
+                    if (autoWebhook && !string.IsNullOrEmpty(botToken))
+                    {
+                        _logger.LogInformation("Discord webhook validation failed, but auto-webhook is enabled and bot token is provided");
+                        _logger.LogInformation("A new webhook will be created automatically during initialization");
+                        return true;
+                    }
+
                     return false;
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Discord webhook validation failed with exception");
+
+                // If webhook validation failed but auto-webhook is enabled and bot token is provided,
+                // we'll create a new webhook later, so validation passes
+                if (autoWebhook && !string.IsNullOrEmpty(botToken))
+                {
+                    _logger.LogInformation("Discord webhook validation failed, but auto-webhook is enabled and bot token is provided");
+                    _logger.LogInformation("A new webhook will be created automatically during initialization");
+                    return true;
+                }
+
                 return false;
             }
         }
