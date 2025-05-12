@@ -30,7 +30,6 @@ namespace DC.QQ.TG.Adapters
         private Task? _receiveTask;
         private Task? _sendTask;
         private bool _useWebSocket;
-        private Dictionary<string, string> _qqNicknameCache = new Dictionary<string, string>();
 
         public MessageSource Platform => MessageSource.QQ;
 
@@ -105,9 +104,6 @@ namespace DC.QQ.TG.Adapters
                     action = "get_group_list",
                     @params = new { }
                 });
-
-                // Get group members to build nickname cache
-                await GetGroupMembersAsync();
             }
             catch (Exception ex)
             {
@@ -220,7 +216,7 @@ namespace DC.QQ.TG.Adapters
             }
         }
 
-        private Task ProcessWebSocketMessageAsync(string message)
+        private async Task ProcessWebSocketMessageAsync(string message)
         {
             try
             {
@@ -235,12 +231,15 @@ namespace DC.QQ.TG.Adapters
 
                     // Skip if we've already processed this message or message ID is null
                     if (string.IsNullOrEmpty(messageId) || messageId == _lastMessageId)
-                        return Task.CompletedTask;
+                        return;
 
                     _lastMessageId = messageId;
 
                     // Parse the message content
                     string messageContent = ParseQQMessageContent(response["message"]);
+
+                    // Replace @ placeholders with actual nicknames
+                    messageContent = await ReplaceQQUserPlaceholdersAsync(messageContent);
 
                     // Get user ID for avatar URL
                     string userId = response["sender"]?["user_id"]?.ToString() ?? "Unknown";
@@ -263,7 +262,7 @@ namespace DC.QQ.TG.Adapters
 
                     MessageReceived?.Invoke(this, qqMessage);
                 }
-                // Check if this is a response to get_group_list or get_group_member_list
+                // Check if this is a response to get_group_list
                 else if (response["data"] != null && response["status"]?.ToString() == "ok")
                 {
                     // Check if we should show NapCat responses
@@ -275,19 +274,8 @@ namespace DC.QQ.TG.Adapters
                             response.ToString(Formatting.Indented));
                     }
 
-                    // Check if this is a response to get_group_member_list
-                    if (response["echo"]?.ToString() == "get_group_member_list" ||
-                        (response["data"] != null && (response["data"]?["group_id"]?.ToString() == _groupId)))
-                    {
-                        // Process group member list response
-                        ProcessGroupMemberListResponse(response);
-                    }
-                    // Otherwise, assume it's a response to get_group_list
-                    else
-                    {
-                        // Process group list response
-                        ProcessGroupListResponse(response);
-                    }
+                    // Process group list response
+                    ProcessGroupListResponse(response);
                 }
             }
             catch (Exception ex)
@@ -295,7 +283,7 @@ namespace DC.QQ.TG.Adapters
                 _logger.LogError(ex, "Error processing WebSocket message: {Message}", message);
             }
 
-            return Task.CompletedTask;
+            return;
         }
 
         private void ProcessGroupListResponse(JObject response)
@@ -370,131 +358,7 @@ namespace DC.QQ.TG.Adapters
             }
         }
 
-        /// <summary>
-        /// Gets the group members and builds a cache of QQ IDs to nicknames
-        /// </summary>
-        private async Task GetGroupMembersAsync()
-        {
-            try
-            {
-                _logger.LogInformation("Getting members for QQ group {GroupId}", _groupId);
 
-                if (_useWebSocket && _webSocket?.State == WebSocketState.Open)
-                {
-                    // Send via WebSocket
-                    await SendWebSocketCommandAsync(new
-                    {
-                        action = "get_group_member_list",
-                        @params = new
-                        {
-                            group_id = _groupId
-                        }
-                    });
-
-                    // The response will be handled in ProcessWebSocketMessageAsync
-                    // We'll add a delay to give time for the response to be processed
-                    await Task.Delay(1000);
-                }
-                else
-                {
-                    // Send via HTTP
-                    var response = await _httpClient.PostJsonAsync<JObject>("/get_group_member_list", new
-                    {
-                        group_id = _groupId
-                    });
-
-                    // Check if we should show NapCat responses
-                    bool showNapCatResponse = _configuration["Debug:ShowNapCatResponse"]?.ToLower() == "true";
-                    if (showNapCatResponse)
-                    {
-                        _logger.LogInformation("NapCat API Group Member List Response: {Response}",
-                            response.ToString(Formatting.Indented));
-                    }
-
-                    if (response["status"]?.ToString() == "ok")
-                    {
-                        ProcessGroupMemberListResponse(response);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting group members for QQ group {GroupId}", _groupId);
-            }
-        }
-
-        /// <summary>
-        /// Processes the response from get_group_member_list and builds the nickname cache
-        /// </summary>
-        private void ProcessGroupMemberListResponse(JObject response)
-        {
-            try
-            {
-                // Clear the existing cache
-                _qqNicknameCache.Clear();
-
-                // Check the structure of the response
-                JArray? members = null;
-
-                // The response might have different structures depending on the API version
-                if (response["data"] is JArray dataArray)
-                {
-                    // If data is directly an array
-                    members = dataArray;
-                    _logger.LogDebug("NapCat API returned member data as JArray");
-                }
-                else if (response["data"] is JObject dataObj)
-                {
-                    if (dataObj["list"] is JArray listArray)
-                    {
-                        // If data contains a list property that is an array
-                        members = listArray;
-                        _logger.LogDebug("NapCat API returned data.list as JArray for members");
-                    }
-                    else
-                    {
-                        _logger.LogWarning("NapCat API returned data as JObject but without a list property that is a JArray for members");
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning("Unexpected response format from NapCat API for members. Data structure is not recognized.");
-                }
-
-                if (members != null)
-                {
-                    int memberCount = 0;
-
-                    foreach (var member in members)
-                    {
-                        var userId = member["user_id"]?.ToString();
-
-                        // Try to get the card (group nickname) first, then fall back to nickname
-                        var nickname = member["card"]?.ToString();
-                        if (string.IsNullOrEmpty(nickname))
-                        {
-                            nickname = member["nickname"]?.ToString();
-                        }
-
-                        if (!string.IsNullOrEmpty(userId) && !string.IsNullOrEmpty(nickname))
-                        {
-                            _qqNicknameCache[userId] = nickname;
-                            memberCount++;
-                        }
-                    }
-
-                    _logger.LogInformation("Cached {Count} QQ group member nicknames", memberCount);
-                }
-                else
-                {
-                    _logger.LogWarning("No members found in the NapCat API response");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error processing group member list response");
-            }
-        }
 
         private async Task TestHttpConnectionAsync()
         {
@@ -676,6 +540,184 @@ namespace DC.QQ.TG.Adapters
         }
 
         /// <summary>
+        /// Gets the nickname for a QQ user directly from the API
+        /// </summary>
+        /// <param name="userId">The QQ user ID</param>
+        /// <returns>The user's nickname if found, otherwise the user ID</returns>
+        private async Task<string> GetQQUserNicknameAsync(string userId)
+        {
+            try
+            {
+                _logger.LogDebug("Getting nickname for QQ user {UserId}", userId);
+
+                if (_useWebSocket && _webSocket?.State == WebSocketState.Open)
+                {
+                    // For WebSocket, we need to use get_group_member_info
+                    var tcs = new TaskCompletionSource<string>();
+
+                    // Create a unique echo ID for this request
+                    string echoId = $"get_member_info_{userId}_{DateTime.Now.Ticks}";
+
+                    // Set up a one-time event handler to process the response
+                    EventHandler<string> responseHandler = null;
+                    responseHandler = async (sender, message) =>
+                    {
+                        try
+                        {
+                            var response = JObject.Parse(message);
+
+                            // Check if this is the response we're waiting for
+                            if (response["echo"]?.ToString() == echoId && response["status"]?.ToString() == "ok")
+                            {
+                                string nickname = "Unknown";
+
+                                // Try to get the card (group nickname) first, then fall back to nickname
+                                if (response["data"] is JObject data)
+                                {
+                                    nickname = data["card"]?.ToString() ?? "";
+                                    if (string.IsNullOrEmpty(nickname))
+                                    {
+                                        nickname = data["nickname"]?.ToString() ?? "";
+                                    }
+                                }
+
+                                if (string.IsNullOrEmpty(nickname) || nickname == "Unknown")
+                                {
+                                    nickname = userId; // Fall back to user ID
+                                }
+
+                                tcs.TrySetResult(nickname);
+
+                                // Remove the event handler
+                                if (_webSocket != null)
+                                {
+                                    // We would need to remove the event handler here
+                                    // But since we're using a custom event handling mechanism, we'll handle it differently
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error processing WebSocket response for user nickname");
+                            tcs.TrySetResult(userId); // Fall back to user ID
+                        }
+                    };
+
+                    // Send the request
+                    await SendWebSocketCommandAsync(new
+                    {
+                        action = "get_group_member_info",
+                        echo = echoId,
+                        @params = new
+                        {
+                            group_id = _groupId,
+                            user_id = userId,
+                            no_cache = true
+                        }
+                    });
+
+                    // Wait for the response with a timeout
+                    var timeoutTask = Task.Delay(3000); // 3 second timeout
+                    var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
+
+                    if (completedTask == timeoutTask)
+                    {
+                        _logger.LogWarning("Timeout getting nickname for QQ user {UserId}", userId);
+                        return userId; // Fall back to user ID
+                    }
+
+                    return await tcs.Task;
+                }
+                else
+                {
+                    // For HTTP, we can use get_group_member_info
+                    var response = await _httpClient.PostJsonAsync<JObject>("/get_group_member_info", new
+                    {
+                        group_id = _groupId,
+                        user_id = userId,
+                        no_cache = true
+                    });
+
+                    // Check if we should show NapCat responses
+                    bool showNapCatResponse = _configuration["Debug:ShowNapCatResponse"]?.ToLower() == "true";
+                    if (showNapCatResponse)
+                    {
+                        _logger.LogInformation("NapCat API User Info Response: {Response}",
+                            response.ToString(Formatting.Indented));
+                    }
+
+                    if (response["status"]?.ToString() == "ok" && response["data"] is JObject data)
+                    {
+                        // Try to get the card (group nickname) first, then fall back to nickname
+                        string nickname = data["card"]?.ToString() ?? "";
+                        if (string.IsNullOrEmpty(nickname))
+                        {
+                            nickname = data["nickname"]?.ToString() ?? "";
+                        }
+
+                        if (!string.IsNullOrEmpty(nickname))
+                        {
+                            _logger.LogDebug("Found nickname for QQ user {UserId}: {Nickname}", userId, nickname);
+                            return nickname;
+                        }
+                    }
+
+                    _logger.LogWarning("Failed to get nickname for QQ user {UserId}", userId);
+                    return userId; // Fall back to user ID
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting nickname for QQ user {UserId}", userId);
+                return userId; // Fall back to user ID
+            }
+        }
+
+        /// <summary>
+        /// Replaces QQ user placeholders with actual nicknames
+        /// </summary>
+        /// <param name="content">The message content with placeholders</param>
+        /// <returns>The content with placeholders replaced by nicknames</returns>
+        private async Task<string> ReplaceQQUserPlaceholdersAsync(string content)
+        {
+            try
+            {
+                // Use regex to find all placeholders in the format @__QQ_USER_123456__
+                var regex = new System.Text.RegularExpressions.Regex(@"@__QQ_USER_(\d+)__");
+                var matches = regex.Matches(content);
+
+                // If no placeholders found, return the original content
+                if (matches.Count == 0)
+                    return content;
+
+                // Create a copy of the content that we'll modify
+                string result = content;
+
+                // Process each placeholder
+                foreach (System.Text.RegularExpressions.Match match in matches)
+                {
+                    // Extract the QQ ID
+                    string qqId = match.Groups[1].Value;
+
+                    // Get the nickname for this QQ ID
+                    string nickname = await GetQQUserNicknameAsync(qqId);
+
+                    // Replace the placeholder with the nickname
+                    result = result.Replace(match.Value, $"@{nickname}");
+
+                    _logger.LogDebug("Replaced placeholder for QQ user {QQId} with nickname {Nickname}", qqId, nickname);
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error replacing QQ user placeholders");
+                return content; // Return the original content in case of error
+            }
+        }
+
+        /// <summary>
         /// Parses QQ message content from various formats into a readable string
         /// </summary>
         private string ParseQQMessageContent(JToken? messageToken)
@@ -728,39 +770,24 @@ namespace DC.QQ.TG.Adapters
                                     if (part["data"]?["qq"] != null)
                                     {
                                         string qqId = part["data"]?["qq"]?.ToString() ?? "someone";
-                                        string nickname;
 
-                                        // First try to get the nickname from our cache
-                                        if (_qqNicknameCache.TryGetValue(qqId, out string? cachedNickname) && !string.IsNullOrEmpty(cachedNickname))
+                                        // First try to get the nickname from the data if available
+                                        string nickname = part["data"]?["name"]?.ToString() ?? "";
+
+                                        // If nickname is available in the data, use it
+                                        if (!string.IsNullOrEmpty(nickname))
                                         {
-                                            nickname = cachedNickname;
-                                            _logger.LogDebug("Using cached nickname for QQ user {QQId}: {Nickname}", qqId, nickname);
+                                            _logger.LogDebug("Using nickname from message data for QQ user {QQId}: {Nickname}", qqId, nickname);
+                                            contentBuilder.Append($"@{nickname} ");
                                         }
                                         else
                                         {
-                                            // If not in cache, try to get the nickname from the data if available
-                                            nickname = part["data"]?["name"]?.ToString() ?? "";
-
-                                            // If nickname is not available in the data, use the QQ ID
-                                            if (string.IsNullOrEmpty(nickname))
-                                            {
-                                                nickname = qqId;
-                                                _logger.LogDebug("No nickname found for QQ user {QQId}, using ID", qqId);
-                                            }
-                                            else
-                                            {
-                                                _logger.LogDebug("Using nickname from message data for QQ user {QQId}: {Nickname}", qqId, nickname);
-                                            }
-
-                                            // Add to cache for future use
-                                            if (!string.IsNullOrEmpty(nickname) && nickname != qqId)
-                                            {
-                                                _qqNicknameCache[qqId] = nickname;
-                                                _logger.LogDebug("Added nickname to cache for QQ user {QQId}: {Nickname}", qqId, nickname);
-                                            }
+                                            // If nickname is not available in the data, we'll use the QQ ID for now
+                                            // and add a placeholder that will be replaced later
+                                            string placeholder = $"@__QQ_USER_{qqId}__";
+                                            contentBuilder.Append(placeholder);
+                                            _logger.LogDebug("Added placeholder for QQ user {QQId}: {Placeholder}", qqId, placeholder);
                                         }
-
-                                        contentBuilder.Append($"@{nickname} ");
                                     }
                                     break;
 
@@ -880,6 +907,9 @@ namespace DC.QQ.TG.Adapters
                             {
                                 // Parse the message content
                                 string messageContent = ParseQQMessageContent(msg["message"]);
+
+                                // Replace @ placeholders with actual nicknames
+                                messageContent = await ReplaceQQUserPlaceholdersAsync(messageContent);
 
                                 // Get user ID for avatar URL
                                 string userId = msg["sender"]?["user_id"]?.ToString() ?? "Unknown";
