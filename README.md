@@ -10,6 +10,7 @@ A C# console application that enables cross-platform messaging between Discord, 
 - WebSocket and HTTP support for QQ integration
 - Discord Bot API and Webhook support
 - One-click installation scripts for Windows, Linux, and macOS
+- One-click update scripts for easy maintenance
 - Interactive configuration wizard during installation
 - Configurable through appsettings.json or command line arguments
 - Interactive debug shell for testing and diagnostics
@@ -55,6 +56,40 @@ We provide installation scripts for both Windows and Linux/macOS systems to simp
    - Optionally create a symbolic link in /usr/local/bin
 
 For more detailed installation instructions, see [INSTALL.md](INSTALL.md).
+
+### One-Click Update
+
+We provide update scripts for both Windows and Linux/macOS systems to simplify the update process:
+
+#### Windows Update
+
+1. Download the `update.bat` or `update.ps1` script to your DC.QQ.TG installation directory
+2. Run the script by double-clicking `update.bat` or right-clicking `update.ps1` and selecting "Run with PowerShell"
+3. Follow the on-screen instructions
+4. The script will:
+   - Backup your configuration
+   - Pull the latest changes from the repository
+   - Check for and install .NET 9 SDK if needed
+   - Build the application
+   - Restore your configuration
+   - Update the desktop shortcut
+
+#### Linux/macOS Update
+
+1. Download the `update.sh` script to your DC.QQ.TG installation directory
+2. Make it executable: `chmod +x update.sh`
+3. Run the script: `./update.sh`
+4. Follow the on-screen instructions
+5. The script will:
+   - Backup your configuration
+   - Pull the latest changes from the repository
+   - Check for and install .NET 9 SDK if needed
+   - Build the application
+   - Restore your configuration
+   - Update the desktop shortcut (Linux only)
+   - Update the symbolic link (if it exists)
+
+For more detailed update instructions, see [UPDATE.md](UPDATE.md).
 
 ### Manual Setup
 
