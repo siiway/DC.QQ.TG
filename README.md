@@ -9,6 +9,8 @@ A C# console application that enables cross-platform messaging between Discord, 
 - User avatars and formatted usernames across platforms
 - WebSocket and HTTP support for QQ integration
 - Discord Bot API and Webhook support
+- One-click installation scripts for Windows, Linux, and macOS
+- Interactive configuration wizard during installation
 - Configurable through appsettings.json or command line arguments
 - Interactive debug shell for testing and diagnostics
 - Runs as a background service
@@ -21,6 +23,40 @@ A C# console application that enables cross-platform messaging between Discord, 
 - Telegram Bot Token
 
 ## Setup
+
+### One-Click Installation
+
+We provide installation scripts for both Windows and Linux/macOS systems to simplify the setup process:
+
+#### Windows
+
+1. Download the `install.bat` or `install.ps1` script
+2. Run the script by double-clicking `install.bat` or right-clicking `install.ps1` and selecting "Run with PowerShell"
+3. Follow the on-screen instructions
+4. The script will:
+   - Check for and install .NET 9 SDK if needed
+   - Clone the repository
+   - Build the application
+   - Guide you through the configuration process
+   - Create a desktop shortcut
+
+#### Linux/macOS
+
+1. Download the `install.sh` script
+2. Make it executable: `chmod +x install.sh`
+3. Run the script: `./install.sh`
+4. Follow the on-screen instructions
+5. The script will:
+   - Check for and install .NET 9 SDK if needed
+   - Clone the repository
+   - Build the application
+   - Guide you through the configuration process
+   - Create a desktop shortcut (Linux only)
+   - Optionally create a symbolic link in /usr/local/bin
+
+For more detailed installation instructions, see [INSTALL.md](INSTALL.md).
+
+### Manual Setup
 
 1. Clone the repository
 2. Configure the application by editing `appsettings.json`:
@@ -61,6 +97,7 @@ A C# console application that enables cross-platform messaging between Discord, 
 You can use either Discord Bot API or Webhook for Discord integration:
 
 #### Discord Bot API (Recommended for bidirectional messaging)
+
 1. Create a Discord application at [Discord Developer Portal](https://discord.com/developers/applications)
 2. Create a bot for your application
 3. Enable the following Intents under the Bot settings:
@@ -80,6 +117,7 @@ You can use either Discord Bot API or Webhook for Discord integration:
 6. Get your Guild ID (server ID) and Channel ID and set them in the configuration
 
 #### Discord Webhook (One-way messaging to Discord only)
+
 1. Create a Discord server or use an existing one
 2. You can either:
    - **Manually create a webhook in the correct channel**:
@@ -121,12 +159,14 @@ All parameters are required for their respective platforms. The application will
 
 ### Command Line Arguments
 
-#### NapCat (QQ) Parameters:
+#### NapCat (QQ) Parameters
+
 - `--napcat-url`: The URL of the NapCat API (can be HTTP or WebSocket)
 - `--napcat-token`: Your NapCat API token
 - `--qq-group`: The QQ group ID to send and receive messages from
 
-#### Discord Parameters:
+#### Discord Parameters
+
 - `--discord-webhook-url`: Your Discord webhook URL (for sending messages to Discord)
 - `--discord-bot-token`: Your Discord bot token (for bidirectional messaging)
 - `--discord-guild-id`: Your Discord server (guild) ID
@@ -135,18 +175,33 @@ All parameters are required for their respective platforms. The application will
 - `--auto-webhook`: Whether to automatically manage webhooks (create or move to correct channel) (true/false, default: true, automatically disabled if webhook URL is provided)
 - `--discord-webhook-name`: The name for the automatically managed webhook (default: "Cross-Platform Messenger")
 
-#### Telegram Parameters:
+#### Telegram Parameters
+
 - `--telegram-bot-token`: Your Telegram bot token
 - `--telegram-chat-id`: Your Telegram chat ID
 
-#### Debug Parameters:
+#### Debug Parameters
+
 - `--show-napcat-response`: Show detailed NapCat API responses for debugging
 - `--debug-shell`: Enable an interactive debug shell for testing and diagnostics
 
-#### Platform Control:
+#### Platform Control
+
 - `--disable-qq`: Disable QQ integration
 - `--disable-discord`: Disable Discord integration
 - `--disable-telegram`: Disable Telegram integration
+
+### Interactive Configuration
+
+During installation, the script will guide you through the configuration process with interactive prompts:
+
+1. **Platform Selection**: Choose which platforms you want to enable (QQ, Discord, Telegram)
+2. **NapCat (QQ) Configuration**: Enter your NapCat WebSocket URL, API token, and QQ group ID
+3. **Discord Configuration**: Choose between webhook or bot token, and enter the necessary credentials
+4. **Telegram Configuration**: Enter your Telegram bot token and chat ID
+5. **Debug Options**: Configure debug settings like showing NapCat API responses and enabling the debug shell
+
+This interactive configuration makes it easy to set up the application without manually editing configuration files.
 
 ### Debug Shell
 
