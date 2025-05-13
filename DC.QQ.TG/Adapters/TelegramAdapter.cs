@@ -9,7 +9,7 @@ using Telegram.Bot;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
-using InputFileUrl = Telegram.Bot.Types.InputFile;
+using InputFileUrl = Telegram.Bot.Types.InputFileUrl;
 
 // Use alias to avoid ambiguity with our own Message class
 using TelegramMessage = Telegram.Bot.Types.Message;
@@ -66,10 +66,10 @@ namespace DC.QQ.TG.Adapters
                 // If there's an image URL, send it as a photo
                 if (!string.IsNullOrEmpty(message.ImageUrl))
                 {
-                    // Use the URL directly as InputFile
+                    // Send the photo using the URL directly
                     await _botClient.SendPhotoAsync(
                         chatId: _chatId,
-                        photo: InputFile.FromUri(message.ImageUrl)
+                        photo: new InputFileUrl(message.ImageUrl)
                     );
                 }
 
@@ -87,7 +87,13 @@ namespace DC.QQ.TG.Adapters
 
             var receiverOptions = new ReceiverOptions
             {
-                AllowedUpdates = new[] { UpdateType.Message }
+                AllowedUpdates = [
+                    UpdateType.Message,
+                    UpdateType.EditedMessage,
+                    UpdateType.ChannelPost,
+                    UpdateType.EditedChannelPost
+                ],
+                ThrowPendingUpdates = true // Ignore any pending updates when starting
             };
 
             _botClient.StartReceiving(
@@ -112,18 +118,99 @@ namespace DC.QQ.TG.Adapters
         {
             try
             {
-                // Only process Message updates
-                if (update.Message is not { } telegramMessage)
+                // Get the message from the update
+                TelegramMessage telegramMessage = null;
+
+                // Check different update types
+                if (update.Message != null)
+                    telegramMessage = update.Message;
+                else if (update.EditedMessage != null)
+                    telegramMessage = update.EditedMessage;
+                else if (update.ChannelPost != null)
+                    telegramMessage = update.ChannelPost;
+                else if (update.EditedChannelPost != null)
+                    telegramMessage = update.EditedChannelPost;
+
+                // If no valid message was found, return
+                if (telegramMessage == null)
                     return;
 
-                // Only process text messages
-                if (telegramMessage.Text is not { } messageText)
+                // Check if the message is from the configured chat
+                if (telegramMessage.Chat.Id.ToString() != _chatId)
+                {
+                    _logger.LogDebug("Ignoring message from chat {ChatId} (configured chat is {ConfiguredChatId})",
+                        telegramMessage.Chat.Id, _chatId);
                     return;
+                }
 
-                // Get user info for avatar
+                // Get user info
                 var userId = telegramMessage.From?.Id.ToString() ?? "Unknown";
-                var userName = telegramMessage.From?.FirstName + " " + telegramMessage.From?.LastName;
+                var firstName = telegramMessage.From?.FirstName ?? "";
+                var lastName = telegramMessage.From?.LastName ?? "";
+                var userName = string.IsNullOrEmpty(lastName) ? firstName : $"{firstName} {lastName}";
 
+                // Use username if available
+                if (!string.IsNullOrEmpty(telegramMessage.From?.Username))
+                {
+                    userName = telegramMessage.From.Username;
+                }
+
+                // Extract message content
+                string messageText = "";
+
+                // Process text messages
+                if (!string.IsNullOrEmpty(telegramMessage.Text))
+                {
+                    messageText = telegramMessage.Text;
+                }
+                // Process caption from media messages
+                else if (!string.IsNullOrEmpty(telegramMessage.Caption))
+                {
+                    messageText = telegramMessage.Caption;
+                }
+                // Handle other message types
+                else if (telegramMessage.Sticker != null)
+                {
+                    messageText = $"[Sticker: {telegramMessage.Sticker.Emoji}]";
+                }
+                else if (telegramMessage.Animation != null)
+                {
+                    messageText = "[GIF]";
+                }
+                else if (telegramMessage.Video != null)
+                {
+                    messageText = "[Video]";
+                }
+                else if (telegramMessage.Audio != null)
+                {
+                    messageText = "[Audio]";
+                }
+                else if (telegramMessage.Voice != null)
+                {
+                    messageText = "[Voice Message]";
+                }
+                else if (telegramMessage.Document != null)
+                {
+                    messageText = $"[Document: {telegramMessage.Document.FileName}]";
+                }
+                else if (telegramMessage.Location != null)
+                {
+                    messageText = $"[Location: {telegramMessage.Location.Latitude}, {telegramMessage.Location.Longitude}]";
+                }
+                else if (telegramMessage.Poll != null)
+                {
+                    messageText = $"[Poll: {telegramMessage.Poll.Question}]";
+                }
+                else if (telegramMessage.Photo != null && telegramMessage.Photo.Length > 0)
+                {
+                    messageText = "[Photo]";
+                }
+                else
+                {
+                    messageText = "[Unsupported message type]";
+                }
+
+                // Create message object
                 var message = new Models.Message
                 {
                     Content = messageText,
@@ -131,7 +218,7 @@ namespace DC.QQ.TG.Adapters
                     SenderId = userId,
                     Source = MessageSource.Telegram,
                     Timestamp = telegramMessage.Date.ToLocalTime(),
-                    AvatarUrl = GetTelegramAvatarUrl(telegramMessage.From)
+                    AvatarUrl = await GetTelegramAvatarUrlAsync(telegramMessage.From, botClient, cancellationToken)
                 };
 
                 // If the message contains a photo, get the URL
@@ -142,7 +229,16 @@ namespace DC.QQ.TG.Adapters
                     var token = _configuration["Telegram:BotToken"];
                     message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
                 }
+                // If the message contains a sticker, get the URL
+                else if (telegramMessage.Sticker != null && telegramMessage.Sticker.IsAnimated == false)
+                {
+                    var fileId = telegramMessage.Sticker.FileId;
+                    var fileInfo = await botClient.GetFileAsync(fileId, cancellationToken);
+                    var token = _configuration["Telegram:BotToken"];
+                    message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+                }
 
+                _logger.LogInformation("Received message from Telegram: {Message}", messageText);
                 MessageReceived?.Invoke(this, message);
             }
             catch (Exception ex)
@@ -160,7 +256,7 @@ namespace DC.QQ.TG.Adapters
         /// <summary>
         /// Gets the avatar URL for a Telegram user
         /// </summary>
-        private string GetTelegramAvatarUrl(Telegram.Bot.Types.User? user)
+        private async Task<string> GetTelegramAvatarUrlAsync(User user, ITelegramBotClient botClient, CancellationToken cancellationToken)
         {
             // If user is null or we don't have a bot token, return default avatar
             if (user == null || string.IsNullOrEmpty(_configuration["Telegram:BotToken"]))
@@ -172,19 +268,30 @@ namespace DC.QQ.TG.Adapters
             try
             {
                 // Try to get user profile photos
-                var token = _configuration["Telegram:BotToken"];
+                var photos = await botClient.GetUserProfilePhotosAsync(user.Id, 0, 1, cancellationToken);
 
-                // Telegram doesn't provide a direct way to get avatar URL through the Bot API
-                // We need to get the user's profile photos and use the first one
-                // This URL format works for getting the profile photo file
-                string avatarUrl = $"https://api.telegram.org/bot{token}/getUserProfilePhotos?user_id={user.Id}";
-                _logger.LogInformation("Successfully retrieved Telegram avatar URL for user {UserId}: {AvatarUrl}",
-                    user.Id, avatarUrl);
-                return avatarUrl;
+                // Check if user has profile photos
+                if (photos.TotalCount > 0 && photos.Photos.Length > 0 && photos.Photos[0].Length > 0)
+                {
+                    // Get the file path for the photo
+                    var fileId = photos.Photos[0][^1].FileId; // Get the highest resolution photo
+                    var fileInfo = await botClient.GetFileAsync(fileId, cancellationToken);
+                    var token = _configuration["Telegram:BotToken"];
+
+                    // Construct the URL to the photo
+                    string avatarUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+                    _logger.LogInformation("Successfully retrieved Telegram avatar URL for user {UserId}", user.Id);
+                    return avatarUrl;
+                }
+                else
+                {
+                    _logger.LogWarning("User {UserId} has no profile photos. Using default avatar.", user.Id);
+                    return "https://avatars.githubusercontent.com/u/197464182";
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting Telegram avatar URL");
+                _logger.LogError(ex, "Error getting Telegram avatar URL for user {UserId}", user.Id);
                 return "https://avatars.githubusercontent.com/u/197464182";
             }
         }
