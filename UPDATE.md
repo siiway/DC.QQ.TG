@@ -72,6 +72,7 @@ If you prefer to update the application manually, follow these steps:
    ```
    dotnet restore
    dotnet publish -c Release -r win-x64 -o ./publish --self-contained
+   # Change win-x64 to match your system architecture
    ```
 5. Restore your configuration file:
    ```
@@ -96,6 +97,7 @@ If you prefer to update the application manually, follow these steps:
    dotnet publish -c Release -r linux-x64 -o ./publish --self-contained
    # For macOS
    dotnet publish -c Release -r osx-x64 -o ./publish --self-contained
+   # Change linux-x64 or osx-x64 to match your system architecture
    ```
 5. Make the executable file executable:
    ```

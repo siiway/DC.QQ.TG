@@ -204,7 +204,7 @@ namespace DC.QQ.TG.Services
                 var botClient = new TelegramBotClient(botToken);
 
                 _logger.LogDebug("Requesting Telegram bot information...");
-                var me = await botClient.GetMeAsync();
+                var me = await botClient.GetMe();
 
                 _logger.LogInformation("Telegram bot found: @{Username} (ID: {BotId})",
                     me.Username, me.Id);
@@ -213,7 +213,7 @@ namespace DC.QQ.TG.Services
                 try
                 {
                     _logger.LogDebug("Validating Telegram chat ID: {ChatId}", chatId);
-                    var chat = await botClient.GetChatAsync(chatId);
+                    var chat = await botClient.GetChat(chatId);
 
                     string chatName = chat.Title ?? chat.Username ?? "Private Chat";
                     string chatType = chat.Type.ToString();

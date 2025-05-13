@@ -9,7 +9,7 @@ using Telegram.Bot;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
-using InputFileUrl = Telegram.Bot.Types.InputFileUrl;
+using InputFile = Telegram.Bot.Types.InputFile;
 
 // Use alias to avoid ambiguity with our own Message class
 using TelegramMessage = Telegram.Bot.Types.Message;
@@ -58,7 +58,7 @@ namespace DC.QQ.TG.Adapters
                 string text = $"{message.GetFormattedUsername()}: {message.Content}";
 
                 // Send text message
-                await _botClient.SendTextMessageAsync(
+                await _botClient.SendMessage(
                     chatId: _chatId,
                     text: text
                 );
@@ -67,9 +67,9 @@ namespace DC.QQ.TG.Adapters
                 if (!string.IsNullOrEmpty(message.ImageUrl))
                 {
                     // Send the photo using the URL directly
-                    await _botClient.SendPhotoAsync(
+                    await _botClient.SendPhoto(
                         chatId: _chatId,
-                        photo: new InputFileUrl(message.ImageUrl)
+                        photo: InputFile.FromUri(new Uri(message.ImageUrl))
                     );
                 }
 
@@ -85,56 +85,42 @@ namespace DC.QQ.TG.Adapters
         {
             _cts = new CancellationTokenSource();
 
-            var receiverOptions = new ReceiverOptions
+            _logger.LogInformation("Starting Telegram receiver with chat ID: {ChatId}", _chatId);
+
+            try
             {
-                AllowedUpdates = [
-                    UpdateType.Message,
-                    UpdateType.EditedMessage,
-                    UpdateType.ChannelPost,
-                    UpdateType.EditedChannelPost
-                ],
-                ThrowPendingUpdates = true // Ignore any pending updates when starting
-            };
+                // Subscribe to update events
+                _botClient.OnMessage += OnMessageReceived;
 
-            _botClient.StartReceiving(
-                HandleUpdateAsync,
-                HandlePollingErrorAsync,
-                receiverOptions,
-                _cts.Token
-            );
+                _logger.LogInformation("Telegram adapter started listening successfully using event-based approach");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to start Telegram receiver");
+                throw;
+            }
 
-            _logger.LogInformation("Telegram adapter started listening");
             return Task.CompletedTask;
         }
 
         public Task StopListeningAsync()
         {
+            // Unsubscribe from events
+            _botClient.OnMessage -= OnMessageReceived;
+
+            // Cancel the token source
             _cts?.Cancel();
+
             _logger.LogInformation("Telegram adapter stopped listening");
             return Task.CompletedTask;
         }
 
-        private async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
+
+
+        private async Task OnMessageReceived(TelegramMessage telegramMessage, UpdateType updateType)
         {
             try
             {
-                // Get the message from the update
-                TelegramMessage telegramMessage = null;
-
-                // Check different update types
-                if (update.Message != null)
-                    telegramMessage = update.Message;
-                else if (update.EditedMessage != null)
-                    telegramMessage = update.EditedMessage;
-                else if (update.ChannelPost != null)
-                    telegramMessage = update.ChannelPost;
-                else if (update.EditedChannelPost != null)
-                    telegramMessage = update.EditedChannelPost;
-
-                // If no valid message was found, return
-                if (telegramMessage == null)
-                    return;
-
                 // Check if the message is from the configured chat
                 if (telegramMessage.Chat.Id.ToString() != _chatId)
                 {
@@ -218,14 +204,14 @@ namespace DC.QQ.TG.Adapters
                     SenderId = userId,
                     Source = MessageSource.Telegram,
                     Timestamp = telegramMessage.Date.ToLocalTime(),
-                    AvatarUrl = await GetTelegramAvatarUrlAsync(telegramMessage.From, botClient, cancellationToken)
+                    AvatarUrl = await GetTelegramAvatarUrlAsync(telegramMessage.From, _botClient, _cts.Token)
                 };
 
                 // If the message contains a photo, get the URL
                 if (telegramMessage.Photo != null && telegramMessage.Photo.Length > 0)
                 {
                     var fileId = telegramMessage.Photo[^1].FileId;
-                    var fileInfo = await botClient.GetFileAsync(fileId, cancellationToken);
+                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
                     var token = _configuration["Telegram:BotToken"];
                     message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
                 }
@@ -233,7 +219,7 @@ namespace DC.QQ.TG.Adapters
                 else if (telegramMessage.Sticker != null && telegramMessage.Sticker.IsAnimated == false)
                 {
                     var fileId = telegramMessage.Sticker.FileId;
-                    var fileInfo = await botClient.GetFileAsync(fileId, cancellationToken);
+                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
                     var token = _configuration["Telegram:BotToken"];
                     message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
                 }
@@ -243,14 +229,8 @@ namespace DC.QQ.TG.Adapters
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error handling Telegram update");
+                _logger.LogError(ex, "Error handling Telegram message");
             }
-        }
-
-        private Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
-        {
-            _logger.LogError(exception, "Telegram polling error");
-            return Task.CompletedTask;
         }
 
         /// <summary>
@@ -268,14 +248,14 @@ namespace DC.QQ.TG.Adapters
             try
             {
                 // Try to get user profile photos
-                var photos = await botClient.GetUserProfilePhotosAsync(user.Id, 0, 1, cancellationToken);
+                var photos = await botClient.GetUserProfilePhotos(user.Id, 0, 1, cancellationToken);
 
                 // Check if user has profile photos
                 if (photos.TotalCount > 0 && photos.Photos.Length > 0 && photos.Photos[0].Length > 0)
                 {
                     // Get the file path for the photo
                     var fileId = photos.Photos[0][^1].FileId; // Get the highest resolution photo
-                    var fileInfo = await botClient.GetFileAsync(fileId, cancellationToken);
+                    var fileInfo = await botClient.GetFile(fileId, cancellationToken);
                     var token = _configuration["Telegram:BotToken"];
 
                     // Construct the URL to the photo
