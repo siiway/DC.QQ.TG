@@ -11,8 +11,12 @@ We provide installation scripts for both Windows and Linux/macOS systems to simp
 - **Windows**: PowerShell 5.1 or later
 - **Linux/macOS**: Bash shell
 - Internet connection to download dependencies
-- Git (will be installed by the script if not present)
 - Administrator/sudo privileges (recommended but not required)
+
+The script will automatically install:
+
+- .NET 9 SDK (if not already installed)
+- Git (if not already installed on Linux/macOS)
 
 ### Windows Installation
 
@@ -49,7 +53,7 @@ We provide installation scripts for both Windows and Linux/macOS systems to simp
 
 ```bash
 # Download and run in one command
-curl -sSL https://raw.githubusercontent.com/siiway/DC.QQ.TG/main/install.sh | bash
+sudo curl -sSL https://raw.githubusercontent.com/siiway/DC.QQ.TG/main/install.sh | bash
 ```
 
 ## Manual Installation

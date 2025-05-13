@@ -138,9 +138,61 @@ if command_exists dotnet; then
         fi
     fi
 else
-    print_color "$RED" ".NET SDK is not installed or not in PATH."
-    print_color "$RED" "Please install .NET 9 SDK from https://dotnet.microsoft.com/download/dotnet/9.0"
-    exit 1
+    print_color "$YELLOW" ".NET SDK is not installed or not in PATH."
+    print_color "$YELLOW" "Installing .NET 9 SDK automatically..."
+
+    if [[ "$OS" == "linux" ]]; then
+        # Install .NET 9 SDK on Linux
+        print_color "$NC" "Downloading .NET 9 SDK installer for Linux..."
+
+        # Check if we're on a Debian/Ubuntu-based system
+        if command_exists apt-get; then
+            print_color "$NC" "Detected Debian/Ubuntu-based system"
+
+            # Add Microsoft package repository
+            wget https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+            sudo dpkg -i packages-microsoft-prod.deb
+            rm packages-microsoft-prod.deb
+
+            # Install .NET 9 SDK
+            sudo apt-get update
+            sudo apt-get install -y dotnet-sdk-9.0
+        # Check if we're on a RHEL/Fedora-based system
+        elif command_exists dnf; then
+            print_color "$NC" "Detected RHEL/Fedora-based system"
+
+            # Add Microsoft package repository
+            sudo dnf install -y dotnet-sdk-9.0
+        else
+            print_color "$RED" "Unsupported Linux distribution. Please install .NET 9 SDK manually from https://dotnet.microsoft.com/download/dotnet/9.0"
+            exit 1
+        fi
+    elif [[ "$OS" == "macos" ]]; then
+        # Install .NET 9 SDK on macOS using Homebrew
+        if command_exists brew; then
+            print_color "$NC" "Installing .NET 9 SDK using Homebrew..."
+            brew install --cask dotnet-sdk
+        else
+            print_color "$YELLOW" "Homebrew not found. Installing Homebrew first..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            print_color "$NC" "Installing .NET 9 SDK using Homebrew..."
+            brew install --cask dotnet-sdk
+        fi
+    fi
+
+    # Verify installation
+    if command_exists dotnet; then
+        new_dotnet_version=$(dotnet --version)
+        if [[ "$new_dotnet_version" == 9.* ]]; then
+            print_color "$GREEN" ".NET 9 SDK installed successfully: $new_dotnet_version"
+        else
+            print_color "$RED" "Failed to install .NET 9 SDK. Please install it manually from https://dotnet.microsoft.com/download/dotnet/9.0"
+            exit 1
+        fi
+    else
+        print_color "$RED" "Failed to install .NET 9 SDK. Please install it manually from https://dotnet.microsoft.com/download/dotnet/9.0"
+        exit 1
+    fi
 fi
 
 # Check if Git is installed

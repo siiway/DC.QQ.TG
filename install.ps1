@@ -83,9 +83,37 @@ try {
         }
     }
 } catch {
-    Write-ColorOutput ".NET SDK is not installed or not in PATH." "Red"
-    Write-ColorOutput "Please install .NET 9 SDK from https://dotnet.microsoft.com/download/dotnet/9.0" "Red"
-    exit 1
+    Write-ColorOutput ".NET SDK is not installed or not in PATH." "Yellow"
+    Write-ColorOutput "Installing .NET 9 SDK automatically..." "Yellow"
+
+    # Download .NET 9 SDK installer
+    $tempDir = [System.IO.Path]::GetTempPath()
+    $installerPath = Join-Path $tempDir "dotnet-sdk-9.0-win-x64.exe"
+
+    Write-ColorOutput "Downloading .NET 9 SDK installer..." "White"
+    try {
+        # Direct download link for .NET 9 SDK
+        $downloadUrl = "https://download.visualstudio.microsoft.com/download/pr/b5d46ddb-b40d-4bcd-b7d3-a5e2c9039cf1/1c1e8a7b5f9b50f3c0a8cf7c6d211a96/dotnet-sdk-9.0.100-win-x64.exe"
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath
+
+        # Run the installer
+        Write-ColorOutput "Running .NET 9 SDK installer..." "White"
+        Start-Process -FilePath $installerPath -ArgumentList "/quiet" -Wait
+
+        # Verify installation
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        $dotnetVersion = dotnet --version
+        if ($dotnetVersion -match "^9\.") {
+            Write-ColorOutput ".NET 9 SDK installed successfully: $dotnetVersion" "Green"
+        } else {
+            Write-ColorOutput "Failed to install .NET 9 SDK. Please install it manually from https://dotnet.microsoft.com/download/dotnet/9.0" "Red"
+            exit 1
+        }
+    } catch {
+        Write-ColorOutput "Error downloading or installing .NET 9 SDK: $_" "Red"
+        Write-ColorOutput "Please install .NET 9 SDK manually from https://dotnet.microsoft.com/download/dotnet/9.0" "Red"
+        exit 1
+    }
 }
 
 # Determine installation directory
