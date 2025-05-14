@@ -29,6 +29,7 @@ namespace DC.QQ.TG.Services
             try
             {
                 _logger.LogInformation("Initializing message adapters...");
+                _logger.LogInformation("Adapters: {Adapters}", string.Join(", ", _adapters.Select(a => a.Platform)));
 
                 // Initialize all adapters
                 foreach (var adapter in _adapters)
@@ -49,20 +50,28 @@ namespace DC.QQ.TG.Services
 
                 _logger.LogInformation("Starting message adapters...");
 
-                // Start listening on all adapters
+                // Start listening on all adapters in parallel
+                var startTasks = new List<Task>();
+
                 foreach (var adapter in _adapters)
                 {
-                    try
+                    startTasks.Add(Task.Run(async () =>
                     {
-                        _logger.LogInformation("Starting to listen on {Platform} adapter...", adapter.Platform);
-                        await adapter.StartListeningAsync();
-                        _logger.LogInformation("Successfully started listening on {Platform} adapter", adapter.Platform);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to start listening on {Platform} adapter", adapter.Platform);
-                    }
+                        try
+                        {
+                            _logger.LogInformation("Starting to listen on {Platform} adapter...", adapter.Platform);
+                            await adapter.StartListeningAsync();
+                            _logger.LogInformation("Successfully started listening on {Platform} adapter", adapter.Platform);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to start listening on {Platform} adapter", adapter.Platform);
+                        }
+                    }));
                 }
+
+                // Wait for all adapters to start (or fail)
+                await Task.WhenAll(startTasks);
 
                 _logger.LogInformation("Message service started");
 
@@ -85,7 +94,6 @@ namespace DC.QQ.TG.Services
             {
                 _logger.LogInformation("Stopping to listen on {Platform} adapter...", adapter.Platform);
                 adapter.MessageReceived -= OnMessageReceived;
-                _logger.LogInformation("Stopping to listen on {Platform} adapter...", adapter.Platform);
                 await adapter.StopListeningAsync();
             }
 
@@ -109,11 +117,9 @@ namespace DC.QQ.TG.Services
                     message.Source, message.Content);
 
                 // Forward the message to all other platforms
-                var sourceAdapter = sender as IMessageAdapter;
-
-                // Forward the message to all other platforms except the source
-                if (sourceAdapter != null)
+                if (sender is IMessageAdapter sourceAdapter)
                 {
+                    // Forward the message to all other platforms except the source
                     var targetAdapters = _adapters.Where(a => a.Platform != sourceAdapter.Platform);
 
                     foreach (var adapter in targetAdapters)
@@ -144,7 +150,7 @@ namespace DC.QQ.TG.Services
             if (_processedMessages[message.Source.ToString()].Count > 1000)
             {
                 _processedMessages[message.Source.ToString()] =
-                    _processedMessages[message.Source.ToString()].Skip(500).ToHashSet();
+                    new HashSet<string>(_processedMessages[message.Source.ToString()].Skip(500));
             }
         }
 
