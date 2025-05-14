@@ -265,6 +265,7 @@ When the debug shell is enabled, you can use the following commands:
 - `messages`, `msgs`: Show the 10 most recent messages
 - `get messages <count>`: Show the specified number of recent messages
 - `tgmsgs`, `telegram`: Get Telegram chat info and debug information
+- `tgwebhook`, `test-webhook`: Test Telegram webhook connectivity and troubleshoot connection issues
 
 Example:
 

@@ -325,6 +325,150 @@ namespace DC.QQ.TG.Adapters
         }
 
         /// <summary>
+        /// Tests the Telegram webhook connectivity
+        /// </summary>
+        /// <returns>A string containing the test results</returns>
+        public async Task<string> TestWebhookAsync()
+        {
+            try
+            {
+                if (_botClient == null)
+                {
+                    return "Telegram bot client is not initialized.";
+                }
+
+                _logger.LogInformation("Testing Telegram webhook connectivity");
+
+                // Create a new cancellation token source for this operation
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30)); // 30 second timeout
+
+                var result = new StringBuilder();
+                result.AppendLine("=== Telegram Webhook Test ===");
+                result.AppendLine();
+
+                // Check if webhook is configured
+                if (string.IsNullOrEmpty(_webhookUrl))
+                {
+                    result.AppendLine("Webhook is not configured. Please set a webhook URL in the configuration.");
+                    return result.ToString();
+                }
+
+                // Get current webhook info
+                var webhookInfo = await _botClient.GetWebhookInfo(cts.Token);
+
+                result.AppendLine("Current Webhook Configuration:");
+                result.AppendLine($"- URL: {webhookInfo.Url}");
+                result.AppendLine($"- Has Custom Certificate: {webhookInfo.HasCustomCertificate}");
+                result.AppendLine($"- Pending Update Count: {webhookInfo.PendingUpdateCount}");
+                result.AppendLine($"- Max Connections: {webhookInfo.MaxConnections}");
+                result.AppendLine($"- IP Address: {webhookInfo.IpAddress ?? "Not set"}");
+
+                if (webhookInfo.LastErrorDate != null)
+                {
+                    result.AppendLine($"- Last Error Date: {webhookInfo.LastErrorDate?.ToLocalTime()}");
+                    result.AppendLine($"- Last Error Message: {webhookInfo.LastErrorMessage}");
+                }
+                else
+                {
+                    result.AppendLine("- No errors reported");
+                }
+
+                result.AppendLine();
+
+                // Test HTTP listener
+                if (_useWebhook)
+                {
+                    result.AppendLine("Local HTTP Listener Status:");
+
+                    if (_httpListener != null && _httpListener.IsListening)
+                    {
+                        result.AppendLine("- HTTP Listener is running");
+
+                        // Get the prefixes
+                        var prefixes = string.Join(", ", _httpListener.Prefixes);
+                        result.AppendLine($"- Listening on: {prefixes}");
+                    }
+                    else
+                    {
+                        result.AppendLine("- HTTP Listener is not running");
+
+                        // Try to start the listener
+                        result.AppendLine("- Attempting to start HTTP listener...");
+
+                        try
+                        {
+                            await StartWebhookListenerAsync();
+                            result.AppendLine("- Successfully started HTTP listener");
+                        }
+                        catch (Exception ex)
+                        {
+                            result.AppendLine($"- Failed to start HTTP listener: {ex.Message}");
+                        }
+                    }
+
+                    result.AppendLine();
+                }
+
+                // Test webhook by setting it again
+                result.AppendLine("Testing Webhook Connection:");
+
+                try
+                {
+                    // Make sure the webhook URL includes the port if it's not standard
+                    var webhookUri = new Uri(_webhookUrl);
+                    string webhookUrlWithPort = _webhookUrl;
+
+                    // If the URL doesn't include a port but we have a custom port configured
+                    if ((webhookUri.Port == 80 || webhookUri.Port == 443) && _webhookPort != 80 && _webhookPort != 443 && _webhookPort != 0)
+                    {
+                        // Reconstruct the URL with the port
+                        webhookUrlWithPort = $"{webhookUri.Scheme}://{webhookUri.Host}:{_webhookPort}{webhookUri.PathAndQuery}";
+                        result.AppendLine($"- Adding port to webhook URL: {webhookUrlWithPort}");
+                    }
+
+                    // Set the webhook
+                    await _botClient.SetWebhook(webhookUrlWithPort, cancellationToken: cts.Token);
+                    result.AppendLine("- Successfully set webhook");
+
+                    // Get updated webhook info
+                    webhookInfo = await _botClient.GetWebhookInfo(cts.Token);
+
+                    if (string.IsNullOrEmpty(webhookInfo.LastErrorMessage))
+                    {
+                        result.AppendLine("- Webhook is working correctly");
+                    }
+                    else
+                    {
+                        result.AppendLine($"- Webhook error: {webhookInfo.LastErrorMessage}");
+                        result.AppendLine("- Please check your webhook configuration and server settings");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.AppendLine($"- Failed to set webhook: {ex.Message}");
+                    result.AppendLine("- Please check your webhook configuration and server settings");
+                }
+
+                result.AppendLine();
+
+                // Provide troubleshooting tips
+                result.AppendLine("Troubleshooting Tips:");
+                result.AppendLine("1. Make sure your server is publicly accessible");
+                result.AppendLine("2. Ensure your server has a valid SSL certificate (required for webhooks)");
+                result.AppendLine("3. Check that the port is open in your firewall");
+                result.AppendLine("4. Verify that the webhook URL is correct and includes the port if needed");
+                result.AppendLine("5. Telegram only allows webhooks on ports 443, 80, 88, and 8443");
+
+                return result.ToString();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error testing Telegram webhook");
+                return $"Error testing Telegram webhook: {ex.Message}";
+            }
+        }
+
+        /// <summary>
         /// Gets Telegram chat info and bot status for debugging purposes
         /// </summary>
         /// <returns>A string containing the chat info and bot status</returns>
