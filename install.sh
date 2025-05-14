@@ -291,6 +291,7 @@ discord_auto_webhook="true"
 discord_webhook_name="Cross-Platform Messenger"
 telegram_bot_token=""
 telegram_chat_id=""
+telegram_webhook_url=""
 show_napcat_response="false"
 enable_shell="false"
 disable_qq="false"
@@ -378,6 +379,12 @@ if [[ "$configure_now" == "Y" || "$configure_now" == "y" ]]; then
         print_header "Telegram Configuration"
         telegram_bot_token=$(ask_config "Enter Telegram bot token" "" "true")
         telegram_chat_id=$(ask_config "Enter Telegram chat ID" "" "false")
+
+        read -p "Do you want to use a webhook for Telegram? (Y/N, default: N): " use_webhook
+        if [[ "$use_webhook" == "Y" || "$use_webhook" == "y" ]]; then
+            print_color "$YELLOW" "Note: Telegram webhooks require a publicly accessible HTTPS server."
+            telegram_webhook_url=$(ask_config "Enter Telegram webhook URL (e.g., https://your-domain.com/telegram-webhook)" "" "true")
+        fi
     fi
 
     # Debug Configuration
@@ -412,7 +419,8 @@ if [[ "$configure_now" == "Y" || "$configure_now" == "y" ]]; then
   },
   "Telegram": {
     "BotToken": "$telegram_bot_token",
-    "ChatId": "$telegram_chat_id"
+    "ChatId": "$telegram_chat_id",
+    "WebhookUrl": "$telegram_webhook_url"
   },
   "Disabled": {
     "QQ": "$disable_qq",
@@ -447,7 +455,8 @@ else
   },
   "Telegram": {
     "BotToken": "your_telegram_bot_token_here",
-    "ChatId": "your_telegram_chat_id_here"
+    "ChatId": "your_telegram_chat_id_here",
+    "WebhookUrl": "https://your-domain.com/telegram-webhook"
   },
   "Debug": {
     "ShowNapCatResponse": false,
