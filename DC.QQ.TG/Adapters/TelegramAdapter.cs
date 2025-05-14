@@ -1,7 +1,10 @@
 using System;
-using System.Collections.Generic;
+using System.IO;
+using System.Net;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 using DC.QQ.TG.Interfaces;
 using DC.QQ.TG.Models;
 using Microsoft.Extensions.Configuration;
@@ -25,6 +28,12 @@ namespace DC.QQ.TG.Adapters
         private CancellationTokenSource _cts;
         private string _chatId;
 
+        // Webhook related fields
+        private string _webhookUrl;
+        private readonly string _webhookPath = "/telegram-webhook";
+        private HttpListener _httpListener;
+        private bool _useWebhook;
+
         public MessageSource Platform => MessageSource.Telegram;
 
         public event EventHandler<Models.Message> MessageReceived;
@@ -37,12 +46,13 @@ namespace DC.QQ.TG.Adapters
 
         public Task InitializeAsync()
         {
-
             // Trying to fix telegram inbound message issue
             _logger.LogInformation("Initializing Telegram adapter...");
 
             var botToken = _configuration["Telegram:BotToken"];
             _chatId = _configuration["Telegram:ChatId"];
+            _webhookUrl = _configuration["Telegram:WebhookUrl"];
+            _useWebhook = !string.IsNullOrEmpty(_webhookUrl);
 
             if (string.IsNullOrEmpty(botToken) || string.IsNullOrEmpty(_chatId))
             {
@@ -52,6 +62,16 @@ namespace DC.QQ.TG.Adapters
             _logger.LogInformation("Creating Telegram bot client with token: {BotToken}...", botToken[..10] + "......");
             _botClient = new TelegramBotClient(botToken);
             _logger.LogInformation("Telegram bot client created successfully");
+
+            // Log webhook status
+            if (_useWebhook)
+            {
+                _logger.LogInformation("Telegram webhook will be used: {WebhookUrl}", _webhookUrl);
+            }
+            else
+            {
+                _logger.LogInformation("Telegram webhook is not configured, using event-based approach");
+            }
 
             _logger.LogInformation("Telegram adapter initialized with chat ID: {ChatId}", _chatId);
             return Task.CompletedTask;
@@ -109,46 +129,177 @@ namespace DC.QQ.TG.Adapters
 
             try
             {
-                // Delete webhook to ensure we're using long polling
-                await _botClient.DeleteWebhook();
+                if (_useWebhook && !string.IsNullOrEmpty(_webhookUrl))
+                {
+                    // Set up webhook
+                    _logger.LogInformation("Setting up Telegram webhook at {WebhookUrl}", _webhookUrl);
 
-                // Drop pending updates
-                await _botClient.DropPendingUpdates();
+                    // Set the webhook
+                    await _botClient.SetWebhook(_webhookUrl);
 
-                // Subscribe to update events
-                _botClient.OnUpdate += OnUpdateReceived; // Add support for all update types
-                _botClient.OnError += OnErrorReceived;
+                    // Start the webhook listener
+                    await StartWebhookListenerAsync();
 
-                _logger.LogInformation("Telegram adapter started listening successfully using event-based approach");
+                    _logger.LogInformation("Telegram adapter started listening successfully using webhook");
+                }
+                else
+                {
+                    // Delete webhook to ensure we're using long polling
+                    _logger.LogInformation("Deleting any existing webhook to use event-based approach");
+                    await _botClient.DeleteWebhook();
+
+                    // Drop pending updates
+                    await _botClient.DropPendingUpdates();
+
+                    // Subscribe to update events
+                    _botClient.OnUpdate += OnUpdateReceived; // Add support for all update types
+                    _botClient.OnError += OnErrorReceived;
+
+                    _logger.LogInformation("Telegram adapter started listening successfully using event-based approach");
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to start Telegram receiver");
                 throw;
             }
-
-            return;
         }
 
-        public Task StopListeningAsync()
+        private Task StartWebhookListenerAsync()
         {
-            // Unsubscribe from events
-            _botClient.OnUpdate -= OnUpdateReceived;
-            _botClient.OnError -= OnErrorReceived;
+            try
+            {
+                // Create HTTP listener
+                _httpListener = new HttpListener();
+
+                // Extract hostname and port from webhook URL
+                var uri = new Uri(_webhookUrl);
+                string prefix = $"{uri.Scheme}://{uri.Host}:{uri.Port}{_webhookPath}/";
+
+                _logger.LogInformation("Starting HTTP listener on {Prefix}", prefix);
+                _httpListener.Prefixes.Add(prefix);
+                _httpListener.Start();
+
+                // Start listening for requests in a background task
+                _ = Task.Run(WebhookListenerLoopAsync);
+
+                _logger.LogInformation("Webhook listener started successfully");
+                return Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to start webhook listener");
+                throw;
+            }
+        }
+
+        private async Task WebhookListenerLoopAsync()
+        {
+            try
+            {
+                while (_httpListener.IsListening && !_cts.Token.IsCancellationRequested)
+                {
+                    // Wait for a request
+                    var context = await _httpListener.GetContextAsync();
+
+                    // Process the request in a separate task
+                    _ = Task.Run(async () => await ProcessWebhookRequestAsync(context));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal cancellation, no need to log
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in webhook listener loop");
+            }
+            finally
+            {
+                _logger.LogInformation("Webhook listener loop exited");
+            }
+        }
+
+        private async Task ProcessWebhookRequestAsync(HttpListenerContext context)
+        {
+            try
+            {
+                // Read the request body
+                using var reader = new StreamReader(context.Request.InputStream);
+                string json = await reader.ReadToEndAsync();
+
+                _logger.LogDebug("Received webhook request: {Json}", json);
+
+                // Parse the update
+                var update = JsonConvert.DeserializeObject<Update>(json);
+
+                if (update != null)
+                {
+                    // Process the update
+                    await OnUpdateReceived(update);
+
+                    // Send a 200 OK response
+                    context.Response.StatusCode = 200;
+                    context.Response.Close();
+                }
+                else
+                {
+                    _logger.LogWarning("Failed to parse webhook request as Update object");
+                    context.Response.StatusCode = 400;
+                    context.Response.Close();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing webhook request");
+                context.Response.StatusCode = 500;
+                context.Response.Close();
+            }
+        }
+
+        public async Task StopListeningAsync()
+        {
+            _logger.LogInformation("Stopping Telegram adapter...");
 
             // Cancel the token source
             _cts?.Cancel();
 
+            if (_useWebhook)
+            {
+                try
+                {
+                    // Delete the webhook
+                    _logger.LogInformation("Deleting Telegram webhook");
+                    await _botClient.DeleteWebhook();
+
+                    // Stop the HTTP listener
+                    if (_httpListener != null && _httpListener.IsListening)
+                    {
+                        _logger.LogInformation("Stopping HTTP listener");
+                        _httpListener.Stop();
+                        _httpListener.Close();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error stopping webhook listener");
+                }
+            }
+            else
+            {
+                // Unsubscribe from events
+                _botClient.OnUpdate -= OnUpdateReceived;
+                _botClient.OnError -= OnErrorReceived;
+            }
+
             _logger.LogInformation("Telegram adapter stopped listening");
-            return Task.CompletedTask;
         }
 
         /// <summary>
-        /// Gets recent messages from the Telegram chat for debugging purposes
+        /// Gets Telegram chat info and bot status for debugging purposes
         /// </summary>
-        /// <param name="limit">Maximum number of messages to retrieve (default: 10)</param>
-        /// <returns>A string containing the recent messages</returns>
-        public async Task<string> GetRecentMessagesAsync(int limit = 10)
+        /// <returns>A string containing the chat info and bot status</returns>
+        public async Task<string> GetRecentMessagesAsync()
         {
             try
             {
@@ -157,51 +308,118 @@ namespace DC.QQ.TG.Adapters
                     return "Telegram bot client is not initialized.";
                 }
 
-                _logger.LogInformation("Retrieving {Limit} recent messages from Telegram chat {ChatId}", limit, _chatId);
+                _logger.LogInformation("Retrieving Telegram chat info and bot status for chat {ChatId}", _chatId);
 
                 // Create a new cancellation token source for this operation
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30)); // 30 second timeout
 
-                // Get chat history
-                // In Telegram.Bot 22.5.1, we need to use GetChatHistory instead of GetUpdatesAsync
-                var chatId = long.Parse(_chatId);
-                var messages = new List<TelegramMessage>();
+                var result = new StringBuilder();
+                result.AppendLine("=== Telegram Debug Information ===");
+                result.AppendLine();
+
+                // Get bot info
+                User me = null;
+                try
+                {
+                    me = await _botClient.GetMe(cts.Token);
+                    result.AppendLine("Bot Information:");
+                    result.AppendLine($"- ID: {me.Id}");
+                    result.AppendLine($"- Name: {me.FirstName}");
+                    result.AppendLine($"- Username: @{me.Username}");
+                    result.AppendLine($"- Can join groups: {me.CanJoinGroups}");
+                    result.AppendLine($"- Can read all group messages: {me.CanReadAllGroupMessages}");
+                    result.AppendLine($"- Supports inline queries: {me.SupportsInlineQueries}");
+                    result.AppendLine();
+                }
+                catch (Exception ex)
+                {
+                    result.AppendLine($"Error retrieving bot info: {ex.Message}");
+                    result.AppendLine();
+                }
 
                 // Get chat info
                 try
                 {
-                    var history = await _botClient.GetChat(chatId, cts.Token);
-                    _logger.LogInformation("Successfully retrieved chat info: {ChatTitle} ({ChatType})",
-                        history.Title ?? history.Username,
-                        history.Type);
+                    var chatId = long.Parse(_chatId);
+                    var chat = await _botClient.GetChat(chatId, cts.Token);
 
-                    // Send a message to the chat for debugging
-                    await _botClient.SendMessage(
-                        chatId: _chatId,
-                        text: "Retrieving chat info for debugging...",
-                        cancellationToken: cts.Token
-                    );
+                    result.AppendLine("Chat Information:");
+                    result.AppendLine($"- ID: {chat.Id}");
+                    result.AppendLine($"- Type: {chat.Type}");
+                    result.AppendLine($"- Title: {chat.Title ?? "N/A"}");
+                    result.AppendLine($"- Username: {chat.Username ?? "N/A"}");
+                    result.AppendLine($"- Description: {chat.Description ?? "N/A"}");
+                    result.AppendLine($"- Invite Link: {chat.InviteLink ?? "N/A"}");
+                    result.AppendLine();
 
-                    // Return chat info
-                    return $"Chat info: {history.Title ?? history.Username} ({history.Type})\n\n" +
-                           $"Chat ID: {history.Id}\n" +
-                           $"Chat Type: {history.Type}\n" +
-                           $"Username: {history.Username ?? "N/A"}\n" +
-                           $"Title: {history.Title ?? "N/A"}\n" +
-                           $"Description: {history.Description ?? "N/A"}\n\n" +
-                           "Note: Direct message history retrieval is not available in this version of Telegram.Bot.\n" +
-                           "Please check the Telegram chat directly to see recent messages.";
+                    // Try to get chat member count
+                    try
+                    {
+                        var memberCount = await _botClient.GetChatMemberCount(chatId, cts.Token);
+                        result.AppendLine($"- Member Count: {memberCount}");
+                    }
+                    catch
+                    {
+                        result.AppendLine("- Member Count: Unable to retrieve");
+                    }
+
+                    // Try to get bot's member info
+                    try
+                    {
+                        if (me != null)
+                        {
+                            var botMember = await _botClient.GetChatMember(chatId, me.Id, cts.Token);
+                            result.AppendLine($"- Bot's Status in Chat: {botMember.Status}");
+                        }
+                        else
+                        {
+                            result.AppendLine("- Bot's Status in Chat: Unable to retrieve (bot info not available)");
+                        }
+                    }
+                    catch
+                    {
+                        result.AppendLine("- Bot's Status in Chat: Unable to retrieve");
+                    }
+
+                    result.AppendLine();
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error retrieving chat info");
-                    return $"Error retrieving chat info: {ex.Message}";
+                    result.AppendLine($"Error retrieving chat info: {ex.Message}");
+                    result.AppendLine();
                 }
+
+                // Send a test message to verify sending capabilities
+                try
+                {
+                    var sentMessage = await _botClient.SendMessage(
+                        chatId: _chatId,
+                        text: "This is a test message to verify bot functionality.",
+                        cancellationToken: cts.Token
+                    );
+
+                    result.AppendLine("Test Message:");
+                    result.AppendLine($"- Successfully sent test message with ID: {sentMessage.MessageId}");
+                    result.AppendLine($"- Sent at: {sentMessage.Date.ToLocalTime()}");
+                    result.AppendLine();
+                }
+                catch (Exception ex)
+                {
+                    result.AppendLine($"Error sending test message: {ex.Message}");
+                    result.AppendLine();
+                }
+
+                // Note about message history limitation
+                result.AppendLine("Note: Telegram Bot API does not provide a method to retrieve chat history.");
+                result.AppendLine("The bot can only process messages it receives while running.");
+                result.AppendLine("To see message history, please check the Telegram chat directly.");
+
+                return result.ToString();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error retrieving recent messages from Telegram");
-                return $"Error retrieving messages: {ex.Message}";
+                _logger.LogError(ex, "Error retrieving Telegram debug information");
+                return $"Error retrieving Telegram debug information: {ex.Message}";
             }
         }
 
