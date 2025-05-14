@@ -112,7 +112,7 @@ For more detailed update instructions, see [UPDATE.md](UPDATE.md).
   "Telegram": {
     "BotToken": "your_telegram_bot_token_here",
     "ChatId": "your_telegram_chat_id_here",
-    "WebhookUrl": "https://your-domain.com/telegram-webhook",
+    "WebhookUrl": "https://your-domain.com:8443/telegram-webhook",
     "WebhookPort": "8443"
   },
   "Debug": {

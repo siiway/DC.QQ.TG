@@ -143,7 +143,19 @@ namespace DC.QQ.TG.Adapters
                     _logger.LogInformation("Setting up Telegram webhook at {WebhookUrl}", _webhookUrl);
 
                     // Set the webhook
-                    await _botClient.SetWebhook(_webhookUrl);
+                    // Make sure the webhook URL includes the port if it's not standard
+                    var webhookUri = new Uri(_webhookUrl);
+                    string webhookUrlWithPort = _webhookUrl;
+
+                    // If the URL doesn't include a port but we have a custom port configured
+                    if ((webhookUri.Port == 80 || webhookUri.Port == 443) && _webhookPort != 80 && _webhookPort != 443 && _webhookPort != 0)
+                    {
+                        // Reconstruct the URL with the port
+                        webhookUrlWithPort = $"{webhookUri.Scheme}://{webhookUri.Host}:{_webhookPort}{webhookUri.PathAndQuery}";
+                        _logger.LogInformation("Adding port to webhook URL: {WebhookUrl}", webhookUrlWithPort);
+                    }
+
+                    await _botClient.SetWebhook(webhookUrlWithPort);
 
                     // Start the webhook listener
                     await StartWebhookListenerAsync();

@@ -272,8 +272,9 @@ if ($disable_telegram -ne "true") {
     $use_webhook = Read-Host "Do you want to use a webhook for Telegram? (Y/N, default: N)"
     if ($use_webhook -eq "Y" -or $use_webhook -eq "y") {
         Write-ColorOutput "Note: Telegram webhooks require a publicly accessible HTTPS server." "Yellow"
-        $telegram_webhook_url = Get-ConfigValue -Prompt "Enter Telegram webhook URL (e.g., https://your-domain.com/telegram-webhook)" -Default $telegram_webhook_url -IsSecret $true
-        $telegram_webhook_port = Get-ConfigValue -Prompt "Enter Telegram webhook port" -Default $telegram_webhook_port
+        Write-ColorOutput "Important: Include the port in your webhook URL if using a non-standard port (e.g., https://your-domain.com:8443/telegram-webhook)" "Yellow"
+        $telegram_webhook_url = Get-ConfigValue -Prompt "Enter Telegram webhook URL (e.g., https://your-domain.com:8443/telegram-webhook)" -Default $telegram_webhook_url -IsSecret $true
+        $telegram_webhook_port = Get-ConfigValue -Prompt "Enter Telegram webhook port (must match the port in your URL)" -Default $telegram_webhook_port
     }
 }
 

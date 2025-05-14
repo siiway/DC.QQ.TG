@@ -239,8 +239,9 @@ if [[ "$disable_telegram" != "true" ]]; then
     read -p "Do you want to use a webhook for Telegram? (Y/N, default: N): " use_webhook
     if [[ "$use_webhook" == "Y" || "$use_webhook" == "y" ]]; then
         print_color "$YELLOW" "Note: Telegram webhooks require a publicly accessible HTTPS server."
-        telegram_webhook_url=$(ask_config "Enter Telegram webhook URL (e.g., https://your-domain.com/telegram-webhook)" "$telegram_webhook_url" "true")
-        telegram_webhook_port=$(ask_config "Enter Telegram webhook port" "$telegram_webhook_port" "false")
+        print_color "$YELLOW" "Important: Include the port in your webhook URL if using a non-standard port (e.g., https://your-domain.com:8443/telegram-webhook)"
+        telegram_webhook_url=$(ask_config "Enter Telegram webhook URL (e.g., https://your-domain.com:8443/telegram-webhook)" "$telegram_webhook_url" "true")
+        telegram_webhook_port=$(ask_config "Enter Telegram webhook port (must match the port in your URL)" "$telegram_webhook_port" "false")
     fi
 fi
 
