@@ -261,11 +261,13 @@ When the debug shell is enabled, you can use the following commands:
 - `send <message>`: Send a custom message to all platforms
 - `vars`, `variables`, `get`: Show all variables
 - `get <name>`: Show the value of a specific variable
-- `set <name> <value>`: Set the value of a variable
+- `set <name> <value>`: Set the value of a variable and save it to appsettings.json
 - `messages`, `msgs`: Show the 10 most recent messages
 - `get messages <count>`: Show the specified number of recent messages
 - `tgmsgs`, `telegram`: Get Telegram chat info and debug information
 - `tgwebhook`, `test-webhook`: Test Telegram webhook connectivity and troubleshoot connection issues
+
+When you use the `set` command to modify a variable, the change is automatically saved to the `appsettings.json` file. This means your changes will persist even after restarting the application. Some configuration changes (like enabling/disabling platforms) require a restart to take effect.
 
 Example:
 

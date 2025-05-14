@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using DC.QQ.TG.Interfaces;
@@ -54,6 +57,8 @@ namespace DC.QQ.TG.Services
             _shellVariables["discord_webhook"] = _configuration["Discord:WebhookUrl"] ?? string.Empty;
             _shellVariables["telegram_token"] = _configuration["Telegram:BotToken"] ?? string.Empty;
             _shellVariables["telegram_chat"] = _configuration["Telegram:ChatId"] ?? string.Empty;
+            _shellVariables["telegram_webhook_url"] = _configuration["Telegram:WebhookUrl"] ?? string.Empty;
+            _shellVariables["telegram_webhook_port"] = _configuration["Telegram:WebhookPort"] ?? "8443";
             _shellVariables["napcat_url"] = _configuration["NapCat:BaseUrl"] ?? string.Empty;
             _shellVariables["napcat_token"] = _configuration["NapCat:Token"] ?? string.Empty;
             _shellVariables["qq_group"] = _configuration["NapCat:GroupId"] ?? string.Empty;
@@ -411,7 +416,7 @@ namespace DC.QQ.TG.Services
             table.AddRow("send <message>", "Send a custom message to all platforms");
             table.AddRow("vars, variables, get", "Show all variables");
             table.AddRow("get <name>", "Show the value of a specific variable");
-            table.AddRow("set <name> <value>", "Set the value of a variable");
+            table.AddRow("set <name> <value>", "Set the value of a variable and save it to appsettings.json");
             table.AddRow("messages, msgs", "Show the 10 most recent messages");
             table.AddRow("get messages <count>", "Show the specified number of recent messages");
             table.AddRow("tgmsgs, telegram", "Get Telegram chat info and messages (for debugging)");
@@ -523,6 +528,8 @@ namespace DC.QQ.TG.Services
                 "discord_webhook" => "Discord:WebhookUrl",
                 "telegram_token" => "Telegram:BotToken",
                 "telegram_chat" => "Telegram:ChatId",
+                "telegram_webhook_url" => "Telegram:WebhookUrl",
+                "telegram_webhook_port" => "Telegram:WebhookPort",
                 "napcat_url" => "NapCat:BaseUrl",
                 "napcat_token" => "NapCat:Token",
                 "qq_group" => "NapCat:GroupId",
@@ -536,8 +543,82 @@ namespace DC.QQ.TG.Services
 
             if (configKey != null)
             {
-                // We can't directly modify IConfiguration, but we can log that it would be updated
-                AnsiConsole.MarkupLine($"[yellow]Note: Configuration '{configKey}' would be updated to '{value}' on restart.[/]");
+                try
+                {
+                    // Get the path to appsettings.json
+                    string appSettingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+
+                    if (!File.Exists(appSettingsPath))
+                    {
+                        AnsiConsole.MarkupLine($"[red]Error: appsettings.json not found at {appSettingsPath}[/]");
+                        return;
+                    }
+
+                    // Read the current content of appsettings.json
+                    string json = File.ReadAllText(appSettingsPath);
+
+                    // Parse the JSON
+                    JsonNode rootNode;
+                    try
+                    {
+                        rootNode = JsonNode.Parse(json);
+                    }
+                    catch (JsonException ex)
+                    {
+                        AnsiConsole.MarkupLine($"[red]Error parsing appsettings.json: {ex.Message.Replace("[", "[[").Replace("]", "]]")}[/]");
+                        return;
+                    }
+
+                    if (rootNode == null)
+                    {
+                        AnsiConsole.MarkupLine("[red]Error: appsettings.json is empty or invalid[/]");
+                        return;
+                    }
+
+                    // Split the config key into sections
+                    string[] sections = configKey.Split(':');
+                    if (sections.Length != 2)
+                    {
+                        AnsiConsole.MarkupLine($"[red]Error: Invalid config key format: {configKey}[/]");
+                        return;
+                    }
+
+                    string section = sections[0];
+                    string key = sections[1];
+
+                    // Get or create the section node
+                    JsonNode sectionNode = rootNode[section];
+                    if (sectionNode == null)
+                    {
+                        sectionNode = new JsonObject();
+                        rootNode[section] = sectionNode;
+                    }
+
+                    // Update the value
+                    sectionNode[key] = value;
+
+                    // Write the updated JSON back to the file
+                    var options = new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    };
+
+                    string updatedJson = rootNode.ToJsonString(options);
+                    File.WriteAllText(appSettingsPath, updatedJson);
+
+                    AnsiConsole.MarkupLine($"[green]Configuration '{configKey}' updated to '{value}' and saved to appsettings.json[/]");
+
+                    // Inform the user that they need to restart for some changes to take effect
+                    if (name == "debug_shell" || name == "show_napcat_response" ||
+                        name.StartsWith("disable_") || name == "napcat_url")
+                    {
+                        AnsiConsole.MarkupLine("[yellow]Note: You need to restart the application for this change to take effect.[/]");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AnsiConsole.MarkupLine($"[red]Error updating configuration: {ex.Message.Replace("[", "[[").Replace("]", "]]")}[/]");
+                }
             }
         }
 
