@@ -117,6 +117,7 @@ discord_webhook_name="Cross-Platform Messenger"
 telegram_bot_token=""
 telegram_chat_id=""
 telegram_webhook_url=""
+telegram_webhook_port="8443"
 show_napcat_response="false"
 enable_shell="false"
 disable_qq="false"
@@ -126,12 +127,12 @@ disable_telegram="false"
 # Try to load existing configuration
 if [ -f "$config_path" ]; then
     print_color "$NC" "Loading existing configuration..."
-    
+
     # Extract values using grep and sed (basic parsing)
     napcat_url=$(grep -o '"BaseUrl": *"[^"]*"' "$config_path" | sed 's/"BaseUrl": *"\(.*\)"/\1/')
     napcat_token=$(grep -o '"Token": *"[^"]*"' "$config_path" | grep -v "BotToken" | sed 's/"Token": *"\(.*\)"/\1/')
     napcat_group_id=$(grep -o '"GroupId": *"[^"]*"' "$config_path" | sed 's/"GroupId": *"\(.*\)"/\1/')
-    
+
     discord_webhook_url=$(grep -o '"WebhookUrl": *"[^"]*"' "$config_path" | sed 's/"WebhookUrl": *"\(.*\)"/\1/')
     discord_bot_token=$(grep -o '"BotToken": *"[^"]*"' "$config_path" | grep -v "Telegram" | sed 's/"BotToken": *"\(.*\)"/\1/')
     discord_guild_id=$(grep -o '"GuildId": *"[^"]*"' "$config_path" | sed 's/"GuildId": *"\(.*\)"/\1/')
@@ -139,18 +140,18 @@ if [ -f "$config_path" ]; then
     discord_use_proxy=$(grep -o '"UseProxy": *"[^"]*"' "$config_path" | sed 's/"UseProxy": *"\(.*\)"/\1/')
     discord_auto_webhook=$(grep -o '"AutoWebhook": *"[^"]*"' "$config_path" | sed 's/"AutoWebhook": *"\(.*\)"/\1/')
     discord_webhook_name=$(grep -o '"WebhookName": *"[^"]*"' "$config_path" | sed 's/"WebhookName": *"\(.*\)"/\1/')
-    
+
     telegram_bot_token=$(grep -o '"BotToken": *"[^"]*"' "$config_path" | grep "Telegram" -A 1 | grep -o '"BotToken": *"[^"]*"' | sed 's/"BotToken": *"\(.*\)"/\1/')
     telegram_chat_id=$(grep -o '"ChatId": *"[^"]*"' "$config_path" | sed 's/"ChatId": *"\(.*\)"/\1/')
     telegram_webhook_url=$(grep -o '"WebhookUrl": *"[^"]*"' "$config_path" | grep "Telegram" -A 3 | grep -o '"WebhookUrl": *"[^"]*"' | sed 's/"WebhookUrl": *"\(.*\)"/\1/')
-    
+
     disable_qq=$(grep -o '"QQ": *"[^"]*"' "$config_path" | sed 's/"QQ": *"\(.*\)"/\1/')
     disable_discord=$(grep -o '"Discord": *"[^"]*"' "$config_path" | grep "Disabled" -A 3 | grep -o '"Discord": *"[^"]*"' | sed 's/"Discord": *"\(.*\)"/\1/')
     disable_telegram=$(grep -o '"Telegram": *"[^"]*"' "$config_path" | grep "Disabled" -A 3 | grep -o '"Telegram": *"[^"]*"' | sed 's/"Telegram": *"\(.*\)"/\1/')
-    
+
     show_napcat_response=$(grep -o '"ShowNapCatResponse": *[^,}]*' "$config_path" | sed 's/"ShowNapCatResponse": *\(.*\)/\1/')
     enable_shell=$(grep -o '"EnableShell": *[^,}]*' "$config_path" | sed 's/"EnableShell": *\(.*\)/\1/')
-    
+
     print_color "$GREEN" "Existing configuration loaded."
 fi
 
@@ -234,11 +235,12 @@ if [[ "$disable_telegram" != "true" ]]; then
     print_header "Telegram Configuration"
     telegram_bot_token=$(ask_config "Enter Telegram bot token" "$telegram_bot_token" "true")
     telegram_chat_id=$(ask_config "Enter Telegram chat ID" "$telegram_chat_id" "false")
-    
+
     read -p "Do you want to use a webhook for Telegram? (Y/N, default: N): " use_webhook
     if [[ "$use_webhook" == "Y" || "$use_webhook" == "y" ]]; then
         print_color "$YELLOW" "Note: Telegram webhooks require a publicly accessible HTTPS server."
         telegram_webhook_url=$(ask_config "Enter Telegram webhook URL (e.g., https://your-domain.com/telegram-webhook)" "$telegram_webhook_url" "true")
+        telegram_webhook_port=$(ask_config "Enter Telegram webhook port" "$telegram_webhook_port" "false")
     fi
 fi
 
@@ -279,7 +281,8 @@ cat > "$config_path" << EOF
   "Telegram": {
     "BotToken": "$telegram_bot_token",
     "ChatId": "$telegram_chat_id",
-    "WebhookUrl": "$telegram_webhook_url"
+    "WebhookUrl": "$telegram_webhook_url",
+    "WebhookPort": "$telegram_webhook_port"
   },
   "Disabled": {
     "QQ": "$disable_qq",

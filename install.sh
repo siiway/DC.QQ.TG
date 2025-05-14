@@ -257,184 +257,42 @@ fi
 print_header "Configuration Setup"
 config_path="$install_dir/publish/appsettings.json"
 
-# Function to ask for configuration values
-ask_config() {
-    local prompt=$1
-    local default=$2
-    local is_secret=$3
-
-    if [[ "$is_secret" == "true" ]]; then
-        read -p "$prompt (default: keep empty if not used): " value
-    else
-        read -p "$prompt (default: $default): " value
-        value=${value:-$default}
-    fi
-
-    echo "$value"
-}
-
 # Ask if user wants to configure the application now
 print_color "$NC" "Would you like to configure the application now?"
 read -p "This will ask for your API keys and settings (Y/N, default: Y): " configure_now
 configure_now=${configure_now:-Y}
 
-# Initialize configuration variables with defaults
-napcat_url="ws://localhost:3001"
-napcat_token=""
-napcat_group_id=""
-discord_webhook_url=""
-discord_bot_token=""
-discord_guild_id=""
-discord_channel_id=""
-discord_use_proxy="true"
-discord_auto_webhook="true"
-discord_webhook_name="Cross-Platform Messenger"
-telegram_bot_token=""
-telegram_chat_id=""
-telegram_webhook_url=""
-show_napcat_response="false"
-enable_shell="false"
-disable_qq="false"
-disable_discord="false"
-disable_telegram="false"
-
 if [[ "$configure_now" == "Y" || "$configure_now" == "y" ]]; then
-    print_color "$CYAN" "Let's configure your application. You can leave fields empty if you don't want to use that platform."
-    print_color "$YELLOW" "Note: You must configure at least one platform (QQ, Discord, or Telegram)."
-
-    # Platform selection
-    print_header "Platform Selection"
-    read -p "Do you want to use QQ? (Y/N, default: Y): " use_qq
-    use_qq=${use_qq:-Y}
-    if [[ "$use_qq" != "Y" && "$use_qq" != "y" ]]; then
-        disable_qq="true"
-        print_color "$YELLOW" "QQ platform disabled."
-    fi
-
-    read -p "Do you want to use Discord? (Y/N, default: Y): " use_discord
-    use_discord=${use_discord:-Y}
-    if [[ "$use_discord" != "Y" && "$use_discord" != "y" ]]; then
-        disable_discord="true"
-        print_color "$YELLOW" "Discord platform disabled."
-    fi
-
-    read -p "Do you want to use Telegram? (Y/N, default: Y): " use_telegram
-    use_telegram=${use_telegram:-Y}
-    if [[ "$use_telegram" != "Y" && "$use_telegram" != "y" ]]; then
-        disable_telegram="true"
-        print_color "$YELLOW" "Telegram platform disabled."
-    fi
-
-    # Check if at least one platform is enabled
-    if [[ "$disable_qq" == "true" && "$disable_discord" == "true" && "$disable_telegram" == "true" ]]; then
-        print_color "$RED" "Error: You must enable at least one platform."
-        exit 1
-    fi
-
-    # NapCat (QQ) Configuration
-    if [[ "$disable_qq" != "true" ]]; then
-        print_header "NapCat (QQ) Configuration"
-        napcat_url=$(ask_config "Enter NapCat WebSocket URL" "$napcat_url" "false")
-        napcat_token=$(ask_config "Enter NapCat API token" "" "true")
-        napcat_group_id=$(ask_config "Enter QQ group ID" "" "false")
-    fi
-
-    # Discord Configuration
-    if [[ "$disable_discord" != "true" ]]; then
-        print_header "Discord Configuration"
-        print_color "$NC" "You can use either a webhook URL or a bot token with guild and channel IDs."
-
-        read -p "Do you want to use a webhook? (Y/N, default: Y): " use_webhook
-        use_webhook=${use_webhook:-Y}
-
-        if [[ "$use_webhook" == "Y" || "$use_webhook" == "y" ]]; then
-            discord_webhook_url=$(ask_config "Enter Discord webhook URL" "" "true")
-            discord_auto_webhook="false"  # No need for auto-webhook if URL is provided
+    # Copy config.sh to the installation directory if it doesn't exist
+    if [ ! -f "$install_dir/config.sh" ]; then
+        if [ -f "./config.sh" ]; then
+            cp "./config.sh" "$install_dir/"
+            chmod +x "$install_dir/config.sh"
+            print_color "$NC" "Configuration script copied to installation directory."
         else
-            discord_bot_token=$(ask_config "Enter Discord bot token" "" "true")
-            discord_guild_id=$(ask_config "Enter Discord guild (server) ID" "" "false")
-            discord_channel_id=$(ask_config "Enter Discord channel ID" "" "false")
-
-            read -p "Do you want to enable auto-webhook creation? (Y/N, default: Y): " auto_webhook
-            auto_webhook=${auto_webhook:-Y}
-            if [[ "$auto_webhook" == "Y" || "$auto_webhook" == "y" ]]; then
-                discord_auto_webhook="true"
-                discord_webhook_name=$(ask_config "Enter webhook name" "$discord_webhook_name" "false")
-            else
-                discord_auto_webhook="false"
-            fi
+            print_color "$RED" "Error: config.sh not found in current directory."
+            print_color "$RED" "Creating a default configuration file instead."
+            configure_now="N"
         fi
+    fi
 
-        read -p "Do you want to use a proxy for Discord API calls? (Y/N, default: Y): " use_proxy
-        use_proxy=${use_proxy:-Y}
-        if [[ "$use_proxy" == "Y" || "$use_proxy" == "y" ]]; then
-            discord_use_proxy="true"
+    if [[ "$configure_now" == "Y" || "$configure_now" == "y" ]]; then
+        # Run the configuration script
+        print_color "$NC" "Running configuration script..."
+        cd "$install_dir"
+        ./config.sh
+
+        # Check if configuration was successful
+        if [ $? -ne 0 ]; then
+            print_color "$RED" "Configuration failed. Creating a default configuration file instead."
+            configure_now="N"
         else
-            discord_use_proxy="false"
+            print_color "$GREEN" "Configuration completed successfully."
         fi
     fi
+fi
 
-    # Telegram Configuration
-    if [[ "$disable_telegram" != "true" ]]; then
-        print_header "Telegram Configuration"
-        telegram_bot_token=$(ask_config "Enter Telegram bot token" "" "true")
-        telegram_chat_id=$(ask_config "Enter Telegram chat ID" "" "false")
-
-        read -p "Do you want to use a webhook for Telegram? (Y/N, default: N): " use_webhook
-        if [[ "$use_webhook" == "Y" || "$use_webhook" == "y" ]]; then
-            print_color "$YELLOW" "Note: Telegram webhooks require a publicly accessible HTTPS server."
-            telegram_webhook_url=$(ask_config "Enter Telegram webhook URL (e.g., https://your-domain.com/telegram-webhook)" "" "true")
-        fi
-    fi
-
-    # Debug Configuration
-    print_header "Debug Configuration"
-    read -p "Do you want to show NapCat API responses? (Y/N, default: N): " show_responses
-    if [[ "$show_responses" == "Y" || "$show_responses" == "y" ]]; then
-        show_napcat_response="true"
-    fi
-
-    read -p "Do you want to enable the debug shell? (Y/N, default: N): " debug_shell
-    if [[ "$debug_shell" == "Y" || "$debug_shell" == "y" ]]; then
-        enable_shell="true"
-    fi
-
-    # Create the configuration file
-    print_color "$NC" "Creating configuration file..."
-    cat > "$config_path" << EOF
-{
-  "NapCat": {
-    "BaseUrl": "$napcat_url",
-    "Token": "$napcat_token",
-    "GroupId": "$napcat_group_id"
-  },
-  "Discord": {
-    "WebhookUrl": "$discord_webhook_url",
-    "BotToken": "$discord_bot_token",
-    "GuildId": "$discord_guild_id",
-    "ChannelId": "$discord_channel_id",
-    "UseProxy": "$discord_use_proxy",
-    "AutoWebhook": "$discord_auto_webhook",
-    "WebhookName": "$discord_webhook_name"
-  },
-  "Telegram": {
-    "BotToken": "$telegram_bot_token",
-    "ChatId": "$telegram_chat_id",
-    "WebhookUrl": "$telegram_webhook_url"
-  },
-  "Disabled": {
-    "QQ": "$disable_qq",
-    "Discord": "$disable_discord",
-    "Telegram": "$disable_telegram"
-  },
-  "Debug": {
-    "ShowNapCatResponse": $show_napcat_response,
-    "EnableShell": $enable_shell
-  }
-}
-EOF
-    print_color "$GREEN" "Configuration file created at: $config_path"
-else
+if [[ "$configure_now" != "Y" && "$configure_now" != "y" ]]; then
     # Create default configuration file
     print_color "$NC" "Creating default configuration file..."
     cat > "$config_path" << EOF
@@ -456,7 +314,8 @@ else
   "Telegram": {
     "BotToken": "your_telegram_bot_token_here",
     "ChatId": "your_telegram_chat_id_here",
-    "WebhookUrl": "https://your-domain.com/telegram-webhook"
+    "WebhookUrl": "https://your-domain.com/telegram-webhook",
+    "WebhookPort": "8443"
   },
   "Debug": {
     "ShowNapCatResponse": false,

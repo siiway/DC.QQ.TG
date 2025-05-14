@@ -23,7 +23,18 @@ if exist "%SCRIPT_DIR%config.ps1" (
     echo Found configuration script at: %SCRIPT_DIR%config.ps1
     echo Running PowerShell configuration script...
     echo.
+
+    REM Save current directory
+    set "CURRENT_DIR=%CD%"
+
+    REM Change to script directory to ensure relative paths work correctly
+    cd /d "%SCRIPT_DIR%"
+
+    REM Run the PowerShell script
     powershell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%config.ps1"
+
+    REM Restore original directory
+    cd /d "%CURRENT_DIR%"
 ) else (
     echo Error: Could not find config.ps1 in the same directory.
     echo Please make sure config.ps1 is in the same directory as this batch file.

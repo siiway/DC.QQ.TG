@@ -8,11 +8,11 @@ function Write-ColorOutput {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Message,
-        
+
         [Parameter(Mandatory = $false)]
         [string]$ForegroundColor = "White"
     )
-    
+
     $originalColor = $host.UI.RawUI.ForegroundColor
     $host.UI.RawUI.ForegroundColor = $ForegroundColor
     Write-Output $Message
@@ -25,7 +25,7 @@ function Write-Header {
         [Parameter(Mandatory = $true)]
         [string]$Title
     )
-    
+
     Write-Output ""
     Write-ColorOutput "===== $Title =====" "Cyan"
 }
@@ -35,14 +35,14 @@ function Get-ConfigValue {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Prompt,
-        
+
         [Parameter(Mandatory = $false)]
         [string]$Default = "",
-        
+
         [Parameter(Mandatory = $false)]
         [bool]$IsSecret = $false
     )
-    
+
     if ($IsSecret) {
         if ([string]::IsNullOrEmpty($Default)) {
             $value = Read-Host "$Prompt (default: keep empty if not used)"
@@ -62,7 +62,7 @@ function Get-ConfigValue {
             }
         }
     }
-    
+
     return $value
 }
 
@@ -71,20 +71,20 @@ function Get-JsonValue {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Json,
-        
+
         [Parameter(Mandatory = $true)]
         [string]$Path
     )
-    
+
     try {
         $jsonObj = $Json | ConvertFrom-Json
         $pathParts = $Path -split '\.'
         $current = $jsonObj
-        
+
         foreach ($part in $pathParts) {
             $current = $current.$part
         }
-        
+
         return $current
     } catch {
         return ""
@@ -139,6 +139,7 @@ $discord_webhook_name = "Cross-Platform Messenger"
 $telegram_bot_token = ""
 $telegram_chat_id = ""
 $telegram_webhook_url = ""
+$telegram_webhook_port = "8443"
 $show_napcat_response = "false"
 $enable_shell = "false"
 $disable_qq = "false"
@@ -148,15 +149,15 @@ $disable_telegram = "false"
 # Try to load existing configuration
 if (Test-Path $configPath) {
     Write-Output "Loading existing configuration..."
-    
+
     try {
         $config = Get-Content $configPath -Raw | ConvertFrom-Json
-        
+
         # NapCat
         $napcat_url = $config.NapCat.BaseUrl
         $napcat_token = $config.NapCat.Token
         $napcat_group_id = $config.NapCat.GroupId
-        
+
         # Discord
         $discord_webhook_url = $config.Discord.WebhookUrl
         $discord_bot_token = $config.Discord.BotToken
@@ -165,21 +166,21 @@ if (Test-Path $configPath) {
         $discord_use_proxy = $config.Discord.UseProxy
         $discord_auto_webhook = $config.Discord.AutoWebhook
         $discord_webhook_name = $config.Discord.WebhookName
-        
+
         # Telegram
         $telegram_bot_token = $config.Telegram.BotToken
         $telegram_chat_id = $config.Telegram.ChatId
         $telegram_webhook_url = $config.Telegram.WebhookUrl
-        
+
         # Disabled
         $disable_qq = $config.Disabled.QQ
         $disable_discord = $config.Disabled.Discord
         $disable_telegram = $config.Disabled.Telegram
-        
+
         # Debug
         $show_napcat_response = $config.Debug.ShowNapCatResponse.ToString().ToLower()
         $enable_shell = $config.Debug.EnableShell.ToString().ToLower()
-        
+
         Write-ColorOutput "Existing configuration loaded." "Green"
     } catch {
         Write-ColorOutput "Error loading existing configuration: $_" "Yellow"
@@ -267,11 +268,12 @@ if ($disable_telegram -ne "true") {
     Write-Header "Telegram Configuration"
     $telegram_bot_token = Get-ConfigValue -Prompt "Enter Telegram bot token" -Default $telegram_bot_token -IsSecret $true
     $telegram_chat_id = Get-ConfigValue -Prompt "Enter Telegram chat ID" -Default $telegram_chat_id
-    
+
     $use_webhook = Read-Host "Do you want to use a webhook for Telegram? (Y/N, default: N)"
     if ($use_webhook -eq "Y" -or $use_webhook -eq "y") {
         Write-ColorOutput "Note: Telegram webhooks require a publicly accessible HTTPS server." "Yellow"
         $telegram_webhook_url = Get-ConfigValue -Prompt "Enter Telegram webhook URL (e.g., https://your-domain.com/telegram-webhook)" -Default $telegram_webhook_url -IsSecret $true
+        $telegram_webhook_port = Get-ConfigValue -Prompt "Enter Telegram webhook port" -Default $telegram_webhook_port
     }
 }
 
@@ -312,7 +314,8 @@ $configJson = @"
   "Telegram": {
     "BotToken": "$telegram_bot_token",
     "ChatId": "$telegram_chat_id",
-    "WebhookUrl": "$telegram_webhook_url"
+    "WebhookUrl": "$telegram_webhook_url",
+    "WebhookPort": "$telegram_webhook_port"
   },
   "Disabled": {
     "QQ": "$disable_qq",

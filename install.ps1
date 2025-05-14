@@ -197,176 +197,47 @@ if ([string]::IsNullOrWhiteSpace($configureNow)) {
     $configureNow = "Y"
 }
 
-# Initialize configuration variables with defaults
-$napcat_url = "ws://localhost:3001"
-$napcat_token = ""
-$napcat_group_id = ""
-$discord_webhook_url = ""
-$discord_bot_token = ""
-$discord_guild_id = ""
-$discord_channel_id = ""
-$discord_use_proxy = "true"
-$discord_auto_webhook = "true"
-$discord_webhook_name = "Cross-Platform Messenger"
-$telegram_bot_token = ""
-$telegram_chat_id = ""
-$telegram_webhook_url = ""
-$show_napcat_response = "false"
-$enable_shell = "false"
-$disable_qq = "false"
-$disable_discord = "false"
-$disable_telegram = "false"
-
 if ($configureNow -eq "Y" -or $configureNow -eq "y") {
-    Write-ColorOutput "Let's configure your application. You can leave fields empty if you don't want to use that platform." "Cyan"
-    Write-ColorOutput "Note: You must configure at least one platform (QQ, Discord, or Telegram)." "Yellow"
-
-    # Platform selection
-    Write-Header "Platform Selection"
-    $use_qq = Read-Host "Do you want to use QQ? (Y/N, default: Y)"
-    if ([string]::IsNullOrWhiteSpace($use_qq)) {
-        $use_qq = "Y"
-    }
-    if ($use_qq -ne "Y" -and $use_qq -ne "y") {
-        $disable_qq = "true"
-        Write-ColorOutput "QQ platform disabled." "Yellow"
-    }
-
-    $use_discord = Read-Host "Do you want to use Discord? (Y/N, default: Y)"
-    if ([string]::IsNullOrWhiteSpace($use_discord)) {
-        $use_discord = "Y"
-    }
-    if ($use_discord -ne "Y" -and $use_discord -ne "y") {
-        $disable_discord = "true"
-        Write-ColorOutput "Discord platform disabled." "Yellow"
-    }
-
-    $use_telegram = Read-Host "Do you want to use Telegram? (Y/N, default: Y)"
-    if ([string]::IsNullOrWhiteSpace($use_telegram)) {
-        $use_telegram = "Y"
-    }
-    if ($use_telegram -ne "Y" -and $use_telegram -ne "y") {
-        $disable_telegram = "true"
-        Write-ColorOutput "Telegram platform disabled." "Yellow"
-    }
-
-    # Check if at least one platform is enabled
-    if ($disable_qq -eq "true" -and $disable_discord -eq "true" -and $disable_telegram -eq "true") {
-        Write-ColorOutput "Error: You must enable at least one platform." "Red"
-        exit 1
-    }
-
-    # NapCat (QQ) Configuration
-    if ($disable_qq -ne "true") {
-        Write-Header "NapCat (QQ) Configuration"
-        $napcat_url = Get-ConfigValue -Prompt "Enter NapCat WebSocket URL" -Default $napcat_url
-        $napcat_token = Get-ConfigValue -Prompt "Enter NapCat API token" -IsSecret $true
-        $napcat_group_id = Get-ConfigValue -Prompt "Enter QQ group ID"
-    }
-
-    # Discord Configuration
-    if ($disable_discord -ne "true") {
-        Write-Header "Discord Configuration"
-        Write-ColorOutput "You can use either a webhook URL or a bot token with guild and channel IDs." "White"
-
-        $use_webhook = Read-Host "Do you want to use a webhook? (Y/N, default: Y)"
-        if ([string]::IsNullOrWhiteSpace($use_webhook)) {
-            $use_webhook = "Y"
-        }
-
-        if ($use_webhook -eq "Y" -or $use_webhook -eq "y") {
-            $discord_webhook_url = Get-ConfigValue -Prompt "Enter Discord webhook URL" -IsSecret $true
-            $discord_auto_webhook = "false"  # No need for auto-webhook if URL is provided
+    # Copy config.ps1 to the installation directory if it doesn't exist
+    if (-not (Test-Path (Join-Path $installDir "config.ps1"))) {
+        if (Test-Path (Join-Path $PSScriptRoot "config.ps1")) {
+            Copy-Item -Path (Join-Path $PSScriptRoot "config.ps1") -Destination $installDir
+            Write-ColorOutput "Configuration script copied to installation directory." "White"
         } else {
-            $discord_bot_token = Get-ConfigValue -Prompt "Enter Discord bot token" -IsSecret $true
-            $discord_guild_id = Get-ConfigValue -Prompt "Enter Discord guild (server) ID"
-            $discord_channel_id = Get-ConfigValue -Prompt "Enter Discord channel ID"
+            Write-ColorOutput "Error: config.ps1 not found in current directory." "Red"
+            Write-ColorOutput "Creating a default configuration file instead." "Red"
+            $configureNow = "N"
+        }
+    }
 
-            $auto_webhook = Read-Host "Do you want to enable auto-webhook creation? (Y/N, default: Y)"
-            if ([string]::IsNullOrWhiteSpace($auto_webhook)) {
-                $auto_webhook = "Y"
-            }
-            if ($auto_webhook -eq "Y" -or $auto_webhook -eq "y") {
-                $discord_auto_webhook = "true"
-                $discord_webhook_name = Get-ConfigValue -Prompt "Enter webhook name" -Default $discord_webhook_name
+    if ($configureNow -eq "Y" -or $configureNow -eq "y") {
+        # Run the configuration script
+        Write-ColorOutput "Running configuration script..." "White"
+        $currentLocation = Get-Location
+        Set-Location -Path $installDir
+
+        try {
+            & (Join-Path $installDir "config.ps1")
+
+            # Check if configuration was successful
+            if ($LASTEXITCODE -ne 0) {
+                Write-ColorOutput "Configuration failed. Creating a default configuration file instead." "Red"
+                $configureNow = "N"
             } else {
-                $discord_auto_webhook = "false"
+                Write-ColorOutput "Configuration completed successfully." "Green"
             }
-        }
-
-        $use_proxy = Read-Host "Do you want to use a proxy for Discord API calls? (Y/N, default: Y)"
-        if ([string]::IsNullOrWhiteSpace($use_proxy)) {
-            $use_proxy = "Y"
-        }
-        if ($use_proxy -eq "Y" -or $use_proxy -eq "y") {
-            $discord_use_proxy = "true"
-        } else {
-            $discord_use_proxy = "false"
+        } catch {
+            Write-ColorOutput "Error running configuration script: $_" "Red"
+            Write-ColorOutput "Creating a default configuration file instead." "Red"
+            $configureNow = "N"
+        } finally {
+            # Restore original location
+            Set-Location -Path $currentLocation
         }
     }
-
-    # Telegram Configuration
-    if ($disable_telegram -ne "true") {
-        Write-Header "Telegram Configuration"
-        $telegram_bot_token = Get-ConfigValue -Prompt "Enter Telegram bot token" -IsSecret $true
-        $telegram_chat_id = Get-ConfigValue -Prompt "Enter Telegram chat ID"
-
-        $use_webhook = Read-Host "Do you want to use a webhook for Telegram? (Y/N, default: N)"
-        if ($use_webhook -eq "Y" -or $use_webhook -eq "y") {
-            Write-ColorOutput "Note: Telegram webhooks require a publicly accessible HTTPS server." "Yellow"
-            $telegram_webhook_url = Get-ConfigValue -Prompt "Enter Telegram webhook URL (e.g., https://your-domain.com/telegram-webhook)" -IsSecret $true
-        }
-    }
-
-    # Debug Configuration
-    Write-Header "Debug Configuration"
-    $show_responses = Read-Host "Do you want to show NapCat API responses? (Y/N, default: N)"
-    if ($show_responses -eq "Y" -or $show_responses -eq "y") {
-        $show_napcat_response = "true"
-    }
-
-    $debug_shell = Read-Host "Do you want to enable the debug shell? (Y/N, default: N)"
-    if ($debug_shell -eq "Y" -or $debug_shell -eq "y") {
-        $enable_shell = "true"
-    }
-
-    # Create the configuration file
-    Write-ColorOutput "Creating configuration file..." "White"
-    $configContent = @"
-{
-  "NapCat": {
-    "BaseUrl": "$napcat_url",
-    "Token": "$napcat_token",
-    "GroupId": "$napcat_group_id"
-  },
-  "Discord": {
-    "WebhookUrl": "$discord_webhook_url",
-    "BotToken": "$discord_bot_token",
-    "GuildId": "$discord_guild_id",
-    "ChannelId": "$discord_channel_id",
-    "UseProxy": "$discord_use_proxy",
-    "AutoWebhook": "$discord_auto_webhook",
-    "WebhookName": "$discord_webhook_name"
-  },
-  "Telegram": {
-    "BotToken": "$telegram_bot_token",
-    "ChatId": "$telegram_chat_id",
-    "WebhookUrl": "$telegram_webhook_url"
-  },
-  "Disabled": {
-    "QQ": "$disable_qq",
-    "Discord": "$disable_discord",
-    "Telegram": "$disable_telegram"
-  },
-  "Debug": {
-    "ShowNapCatResponse": $show_napcat_response,
-    "EnableShell": $enable_shell
-  }
 }
-"@
-    Set-Content -Path $configPath -Value $configContent
-    Write-ColorOutput "Configuration file created at: $configPath" "Green"
-} else {
+
+if ($configureNow -ne "Y" -and $configureNow -ne "y") {
     # Create default configuration file
     Write-ColorOutput "Creating default configuration file..." "White"
     $configContent = @"
@@ -388,7 +259,8 @@ if ($configureNow -eq "Y" -or $configureNow -eq "y") {
   "Telegram": {
     "BotToken": "your_telegram_bot_token_here",
     "ChatId": "your_telegram_chat_id_here",
-    "WebhookUrl": "https://your-domain.com/telegram-webhook"
+    "WebhookUrl": "https://your-domain.com/telegram-webhook",
+    "WebhookPort": "8443"
   },
   "Debug": {
     "ShowNapCatResponse": false,
