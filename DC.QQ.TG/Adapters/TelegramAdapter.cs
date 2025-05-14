@@ -38,7 +38,7 @@ namespace DC.QQ.TG.Adapters
         {
 
             // Trying to fix telegram inbound message issue
-            _logger.LogDebug("Initializing Telegram adapter...");
+            _logger.LogInformation("Initializing Telegram adapter...");
 
             var botToken = _configuration["Telegram:BotToken"];
             _chatId = _configuration["Telegram:ChatId"];
@@ -48,9 +48,11 @@ namespace DC.QQ.TG.Adapters
                 throw new InvalidOperationException("Telegram configuration is missing or invalid");
             }
 
+            _logger.LogInformation("Creating Telegram bot client with token: {BotToken}...", botToken[..10] + "......");
             _botClient = new TelegramBotClient(botToken);
-            _logger.LogInformation("Telegram adapter initialized");
+            _logger.LogInformation("Telegram bot client created successfully");
 
+            _logger.LogInformation("Telegram adapter initialized with chat ID: {ChatId}", _chatId);
             return Task.CompletedTask;
         }
 

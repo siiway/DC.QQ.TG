@@ -35,6 +35,7 @@ namespace DC.QQ.TG.Services
                 {
                     try
                     {
+                        _logger.LogInformation("Initializing {Platform} adapter...", adapter.Platform);
                         await adapter.InitializeAsync();
                         adapter.MessageReceived += OnMessageReceived;
                         _processedMessages[adapter.Platform.ToString()] = new HashSet<string>();
@@ -53,8 +54,9 @@ namespace DC.QQ.TG.Services
                 {
                     try
                     {
+                        _logger.LogInformation("Starting to listen on {Platform} adapter...", adapter.Platform);
                         await adapter.StartListeningAsync();
-                        _logger.LogInformation("Started listening on {Platform} adapter", adapter.Platform);
+                        _logger.LogInformation("Successfully started listening on {Platform} adapter", adapter.Platform);
                     }
                     catch (Exception ex)
                     {
@@ -81,7 +83,9 @@ namespace DC.QQ.TG.Services
             // Stop all adapters
             foreach (var adapter in _adapters)
             {
+                _logger.LogInformation("Stopping to listen on {Platform} adapter...", adapter.Platform);
                 adapter.MessageReceived -= OnMessageReceived;
+                _logger.LogInformation("Stopping to listen on {Platform} adapter...", adapter.Platform);
                 await adapter.StopListeningAsync();
             }
 
