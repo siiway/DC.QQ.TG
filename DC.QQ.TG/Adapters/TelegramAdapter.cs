@@ -36,6 +36,10 @@ namespace DC.QQ.TG.Adapters
 
         public Task InitializeAsync()
         {
+
+            // Trying to fix telegram inbound message issue
+            _logger.LogDebug("Initializing Telegram adapter...");
+
             var botToken = _configuration["Telegram:BotToken"];
             _chatId = _configuration["Telegram:ChatId"];
 
@@ -81,7 +85,7 @@ namespace DC.QQ.TG.Adapters
             }
         }
 
-        public Task StartListeningAsync()
+        public async Task StartListeningAsync()
         {
             _cts = new CancellationTokenSource();
 
@@ -89,6 +93,12 @@ namespace DC.QQ.TG.Adapters
 
             try
             {
+                // Delete webhook to ensure we're using long polling
+                await _botClient.DeleteWebhook();
+
+                // Drop pending updates
+                await _botClient.DropPendingUpdates();
+
                 // Subscribe to update events
                 _botClient.OnMessage += OnMessageReceived;
 
@@ -100,7 +110,7 @@ namespace DC.QQ.TG.Adapters
                 throw;
             }
 
-            return Task.CompletedTask;
+            return;
         }
 
         public Task StopListeningAsync()
