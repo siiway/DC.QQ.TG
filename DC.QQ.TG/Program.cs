@@ -341,14 +341,17 @@ namespace DC.QQ.TG
                         services.AddSingleton<IMessageAdapter, QQAdapter>();
                     }
 
-                    if (!discordDisabled)
-                    {
-                        services.AddSingleton<IMessageAdapter, DiscordAdapter>();
-                    }
-
                     if (!telegramDisabled)
                     {
                         services.AddSingleton<IMessageAdapter, TelegramAdapter>();
+                    }
+                    
+                    // idk but discord init will stop init process
+                    // that's why we put it last
+                    // hoping we can fix it later
+                    if (!discordDisabled)
+                    {
+                        services.AddSingleton<IMessageAdapter, DiscordAdapter>();
                     }
 
                     // Register services

@@ -30,17 +30,11 @@ namespace DC.QQ.TG.Services
             {
                 _logger.LogInformation("Initializing message adapters...");
 
-                // Log the number of adapters
                 _logger.LogInformation("Adapters: {Adapters}", string.Join(", ", _adapters.Select(a => a.Platform)));
 
-                // Sort adapters to prioritize Telegram
-                // For debug...
-                var sortedAdapters = _adapters.OrderBy(a => a.Platform != MessageSource.Telegram).ToList();
-                _logger.LogInformation("Prioritized adapter order: {Adapters}", string.Join(", ", sortedAdapters.Select(a => a.Platform)));
+                _logger.LogInformation("Prioritized adapter order: {Adapters}", string.Join(", ", _adapters.Select(a => a.Platform)));
 
-                // Initialize all adapters sequentially to ensure Telegram goes first
-                // For debug...
-                foreach (var adapter in sortedAdapters)
+                foreach (var adapter in _adapters)
                 {
                     try
                     {
@@ -61,7 +55,7 @@ namespace DC.QQ.TG.Services
                 _logger.LogInformation("Starting message adapters...");
 
                 // Start listening on all adapters sequentially to ensure Telegram goes first
-                foreach (var adapter in sortedAdapters)
+                foreach (var adapter in _adapters)
                 {
                     try
                     {
