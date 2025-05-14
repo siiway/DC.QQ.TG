@@ -60,22 +60,38 @@ namespace DC.QQ.TG.Adapters
         {
             try
             {
-                // Format the message with source and sender info
-                string text = $"{message.GetFormattedUsername()}: {message.Content}";
+                // Format the message with source and sender info using Markdown
+                string username = message.GetFormattedUsername();
+                string content = message.Content;
 
-                // Send text message
+                // Escape any Markdown characters in the content to prevent formatting issues
+                content = EscapeMarkdownV2(content);
+
+                // Format the message with Markdown
+                string text = $"*{username}*:\n{content}";
+
+                // Send text message with Markdown formatting
                 await _botClient.SendMessage(
                     chatId: _chatId,
-                    text: text
+                    text: text,
+                    parseMode: ParseMode.MarkdownV2
                 );
 
                 // If there's an image URL, send it as a photo
                 if (!string.IsNullOrEmpty(message.ImageUrl))
                 {
+                    // Format caption with Markdown if needed
+                    string caption = null;
+
+                    // If we want to add a caption to the image, we can do it here
+                    // caption = $"*{EscapeMarkdownV2(message.GetFormattedUsername())}*";
+
                     // Send the photo using the URL directly
                     await _botClient.SendPhoto(
                         chatId: _chatId,
-                        photo: InputFile.FromUri(new Uri(message.ImageUrl))
+                        photo: InputFile.FromUri(new Uri(message.ImageUrl)),
+                        caption: caption,
+                        parseMode: caption != null ? ParseMode.MarkdownV2 : default
                     );
                 }
 
@@ -243,6 +259,36 @@ namespace DC.QQ.TG.Adapters
             {
                 _logger.LogError(ex, "Error handling Telegram message");
             }
+        }
+
+        /// <summary>
+        /// Escapes special characters for Telegram's MarkdownV2 format
+        /// </summary>
+        private static string EscapeMarkdownV2(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return text;
+
+            // Characters that need to be escaped in MarkdownV2: _ * [ ] ( ) ~ ` > # + - = | { } . !
+            return text
+                .Replace("_", "\\_")
+                .Replace("*", "\\*")
+                .Replace("[", "\\[")
+                .Replace("]", "\\]")
+                .Replace("(", "\\(")
+                .Replace(")", "\\)")
+                .Replace("~", "\\~")
+                .Replace("`", "\\`")
+                .Replace(">", "\\>")
+                .Replace("#", "\\#")
+                .Replace("+", "\\+")
+                .Replace("-", "\\-")
+                .Replace("=", "\\=")
+                .Replace("|", "\\|")
+                .Replace("{", "\\{")
+                .Replace("}", "\\}")
+                .Replace(".", "\\.")
+                .Replace("!", "\\!");
         }
 
         /// <summary>
