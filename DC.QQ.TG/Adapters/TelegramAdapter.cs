@@ -60,38 +60,35 @@ namespace DC.QQ.TG.Adapters
         {
             try
             {
-                // Format the message with source and sender info using Markdown
+                // Format the message with source and sender info using HTML
                 string username = message.GetFormattedUsername();
                 string content = message.Content;
 
-                // Escape any Markdown characters in the content to prevent formatting issues
-                content = EscapeMarkdownV2(content);
+                // Format the message with HTML
+                string text = $"<b>{username}</b>:\n{content}";
 
-                // Format the message with Markdown
-                string text = $"*{username}*:\n{content}";
-
-                // Send text message with Markdown formatting
+                // Send text message with HTML formatting
                 await _botClient.SendMessage(
                     chatId: _chatId,
                     text: text,
-                    parseMode: ParseMode.MarkdownV2
+                    parseMode: ParseMode.Html
                 );
 
                 // If there's an image URL, send it as a photo
                 if (!string.IsNullOrEmpty(message.ImageUrl))
                 {
-                    // Format caption with Markdown if needed
+                    // Format caption with HTML if needed
                     string caption = null;
 
                     // If we want to add a caption to the image, we can do it here
-                    // caption = $"*{EscapeMarkdownV2(message.GetFormattedUsername())}*";
+                    // caption = $"<b>{message.GetFormattedUsername()}</b>";
 
                     // Send the photo using the URL directly
                     await _botClient.SendPhoto(
                         chatId: _chatId,
                         photo: InputFile.FromUri(new Uri(message.ImageUrl)),
                         caption: caption,
-                        parseMode: caption != null ? ParseMode.MarkdownV2 : default
+                        parseMode: caption != null ? ParseMode.Html : default
                     );
                 }
 
@@ -119,6 +116,7 @@ namespace DC.QQ.TG.Adapters
 
                 // Subscribe to update events
                 _botClient.OnMessage += OnMessageReceived;
+                _botClient.OnError += OnErrorReceived;
 
                 _logger.LogInformation("Telegram adapter started listening successfully using event-based approach");
             }
@@ -135,11 +133,18 @@ namespace DC.QQ.TG.Adapters
         {
             // Unsubscribe from events
             _botClient.OnMessage -= OnMessageReceived;
+            _botClient.OnError -= OnErrorReceived;
 
             // Cancel the token source
             _cts?.Cancel();
 
             _logger.LogInformation("Telegram adapter stopped listening");
+            return Task.CompletedTask;
+        }
+
+        private Task OnErrorReceived(Exception exception, HandleErrorSource source)
+        {
+            _logger.LogError(exception, "Telegram error from source {Source}", source);
             return Task.CompletedTask;
         }
 
