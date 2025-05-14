@@ -29,17 +29,27 @@ namespace DC.QQ.TG.Services
             try
             {
                 _logger.LogInformation("Initializing message adapters...");
+
+                // Log the number of adapters
                 _logger.LogInformation("Adapters: {Adapters}", string.Join(", ", _adapters.Select(a => a.Platform)));
 
-                // Initialize all adapters
-                foreach (var adapter in _adapters)
+                // Sort adapters to prioritize Telegram
+                // For debug...
+                var sortedAdapters = _adapters.OrderBy(a => a.Platform != MessageSource.Telegram).ToList();
+                _logger.LogInformation("Prioritized adapter order: {Adapters}", string.Join(", ", sortedAdapters.Select(a => a.Platform)));
+
+                // Initialize all adapters sequentially to ensure Telegram goes first
+                // For debug...
+                foreach (var adapter in sortedAdapters)
                 {
                     try
                     {
                         _logger.LogInformation("Initializing {Platform} adapter...", adapter.Platform);
                         await adapter.InitializeAsync();
                         adapter.MessageReceived += OnMessageReceived;
+
                         _processedMessages[adapter.Platform.ToString()] = new HashSet<string>();
+
                         _logger.LogInformation("Successfully initialized {Platform} adapter", adapter.Platform);
                     }
                     catch (Exception ex)
@@ -50,28 +60,20 @@ namespace DC.QQ.TG.Services
 
                 _logger.LogInformation("Starting message adapters...");
 
-                // Start listening on all adapters in parallel
-                var startTasks = new List<Task>();
-
-                foreach (var adapter in _adapters)
+                // Start listening on all adapters sequentially to ensure Telegram goes first
+                foreach (var adapter in sortedAdapters)
                 {
-                    startTasks.Add(Task.Run(async () =>
+                    try
                     {
-                        try
-                        {
-                            _logger.LogInformation("Starting to listen on {Platform} adapter...", adapter.Platform);
-                            await adapter.StartListeningAsync();
-                            _logger.LogInformation("Successfully started listening on {Platform} adapter", adapter.Platform);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Failed to start listening on {Platform} adapter", adapter.Platform);
-                        }
-                    }));
+                        _logger.LogInformation("Starting to listen on {Platform} adapter...", adapter.Platform);
+                        await adapter.StartListeningAsync();
+                        _logger.LogInformation("Successfully started listening on {Platform} adapter", adapter.Platform);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to start listening on {Platform} adapter", adapter.Platform);
+                    }
                 }
-
-                // Wait for all adapters to start (or fail)
-                await Task.WhenAll(startTasks);
 
                 _logger.LogInformation("Message service started");
 
