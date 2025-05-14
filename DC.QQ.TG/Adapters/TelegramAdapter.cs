@@ -115,7 +115,7 @@ namespace DC.QQ.TG.Adapters
                 await _botClient.DropPendingUpdates();
 
                 // Subscribe to update events
-                _botClient.OnMessage += OnMessageReceived;
+                _botClient.OnUpdate += OnUpdateReceived; // Add support for all update types
                 _botClient.OnError += OnErrorReceived;
 
                 _logger.LogInformation("Telegram adapter started listening successfully using event-based approach");
@@ -132,7 +132,7 @@ namespace DC.QQ.TG.Adapters
         public Task StopListeningAsync()
         {
             // Unsubscribe from events
-            _botClient.OnMessage -= OnMessageReceived;
+            _botClient.OnUpdate -= OnUpdateReceived;
             _botClient.OnError -= OnErrorReceived;
 
             // Cancel the token source
@@ -148,153 +148,154 @@ namespace DC.QQ.TG.Adapters
             return Task.CompletedTask;
         }
 
-
-
-        private async Task OnMessageReceived(TelegramMessage telegramMessage, UpdateType updateType)
+        private async Task OnUpdateReceived(Update update)
         {
             try
             {
-                // Check if the message is from the configured chat
-                if (telegramMessage.Chat.Id.ToString() != _chatId)
-                {
-                    _logger.LogDebug("Ignoring message from chat {ChatId} (configured chat is {ConfiguredChatId})",
-                        telegramMessage.Chat.Id, _chatId);
-                    return;
-                }
+                _logger.LogDebug("Received update type: {UpdateType}", update.Type);
 
-                // Get user info
-                var userId = telegramMessage.From?.Id.ToString() ?? "Unknown";
-                var firstName = telegramMessage.From?.FirstName ?? "";
-                var lastName = telegramMessage.From?.LastName ?? "";
-                var userName = string.IsNullOrEmpty(lastName) ? firstName : $"{firstName} {lastName}";
-
-                // Use username if available
-                if (!string.IsNullOrEmpty(telegramMessage.From?.Username))
+                // Handle different update types
+                switch (update.Type)
                 {
-                    userName = telegramMessage.From.Username;
+                    case UpdateType.Message:
+                        if (update.Message != null)
+                            await ProcessMessageAsync(update.Message);
+                        break;
+                    case UpdateType.ChannelPost:
+                        if (update.ChannelPost != null)
+                            await ProcessMessageAsync(update.ChannelPost);
+                        break;
+                    case UpdateType.EditedMessage:
+                        if (update.EditedMessage != null)
+                            await ProcessMessageAsync(update.EditedMessage);
+                        break;
+                    case UpdateType.EditedChannelPost:
+                        if (update.EditedChannelPost != null)
+                            await ProcessMessageAsync(update.EditedChannelPost);
+                        break;
+                    default:
+                        _logger.LogDebug("Unhandled update type: {UpdateType}", update.Type);
+                        break;
                 }
-
-                // Extract message content
-                string messageText = "";
-
-                // Process text messages
-                if (!string.IsNullOrEmpty(telegramMessage.Text))
-                {
-                    messageText = telegramMessage.Text;
-                }
-                // Process caption from media messages
-                else if (!string.IsNullOrEmpty(telegramMessage.Caption))
-                {
-                    messageText = telegramMessage.Caption;
-                }
-                // Handle other message types
-                else if (telegramMessage.Sticker != null)
-                {
-                    messageText = $"[Sticker: {telegramMessage.Sticker.Emoji}]";
-                }
-                else if (telegramMessage.Animation != null)
-                {
-                    messageText = "[GIF]";
-                }
-                else if (telegramMessage.Video != null)
-                {
-                    messageText = "[Video]";
-                }
-                else if (telegramMessage.Audio != null)
-                {
-                    messageText = "[Audio]";
-                }
-                else if (telegramMessage.Voice != null)
-                {
-                    messageText = "[Voice Message]";
-                }
-                else if (telegramMessage.Document != null)
-                {
-                    messageText = $"[Document: {telegramMessage.Document.FileName}]";
-                }
-                else if (telegramMessage.Location != null)
-                {
-                    messageText = $"[Location: {telegramMessage.Location.Latitude}, {telegramMessage.Location.Longitude}]";
-                }
-                else if (telegramMessage.Poll != null)
-                {
-                    messageText = $"[Poll: {telegramMessage.Poll.Question}]";
-                }
-                else if (telegramMessage.Photo != null && telegramMessage.Photo.Length > 0)
-                {
-                    messageText = "[Photo]";
-                }
-                else
-                {
-                    messageText = "[Unsupported message type]";
-                }
-
-                // Create message object
-                var message = new Models.Message
-                {
-                    Content = messageText,
-                    SenderName = userName,
-                    SenderId = userId,
-                    Source = MessageSource.Telegram,
-                    Timestamp = telegramMessage.Date.ToLocalTime(),
-                    AvatarUrl = await GetTelegramAvatarUrlAsync(telegramMessage.From, _botClient, _cts.Token)
-                };
-
-                // If the message contains a photo, get the URL
-                if (telegramMessage.Photo != null && telegramMessage.Photo.Length > 0)
-                {
-                    var fileId = telegramMessage.Photo[^1].FileId;
-                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
-                    var token = _configuration["Telegram:BotToken"];
-                    message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
-                }
-                // If the message contains a sticker, get the URL
-                else if (telegramMessage.Sticker != null && telegramMessage.Sticker.IsAnimated == false)
-                {
-                    var fileId = telegramMessage.Sticker.FileId;
-                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
-                    var token = _configuration["Telegram:BotToken"];
-                    message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
-                }
-
-                _logger.LogInformation("Received message from Telegram: {Message}", messageText);
-                MessageReceived?.Invoke(this, message);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error handling Telegram message");
+                _logger.LogError(ex, "Error processing Telegram update");
             }
         }
 
-        /// <summary>
-        /// Escapes special characters for Telegram's MarkdownV2 format
-        /// </summary>
-        private static string EscapeMarkdownV2(string text)
+        private async Task ProcessMessageAsync(TelegramMessage telegramMessage)
         {
-            if (string.IsNullOrEmpty(text))
-                return text;
+            // Check if the message is from the configured chat
+            if (telegramMessage.Chat.Id.ToString() != _chatId)
+            {
+                _logger.LogDebug("Ignoring message from chat {ChatId} (configured chat is {ConfiguredChatId})",
+                    telegramMessage.Chat.Id, _chatId);
+                return;
+            }
 
-            // Characters that need to be escaped in MarkdownV2: _ * [ ] ( ) ~ ` > # + - = | { } . !
-            return text
-                .Replace("_", "\\_")
-                .Replace("*", "\\*")
-                .Replace("[", "\\[")
-                .Replace("]", "\\]")
-                .Replace("(", "\\(")
-                .Replace(")", "\\)")
-                .Replace("~", "\\~")
-                .Replace("`", "\\`")
-                .Replace(">", "\\>")
-                .Replace("#", "\\#")
-                .Replace("+", "\\+")
-                .Replace("-", "\\-")
-                .Replace("=", "\\=")
-                .Replace("|", "\\|")
-                .Replace("{", "\\{")
-                .Replace("}", "\\}")
-                .Replace(".", "\\.")
-                .Replace("!", "\\!");
+            // Get user info
+            var userId = telegramMessage.From?.Id.ToString() ?? "Unknown";
+            var firstName = telegramMessage.From?.FirstName ?? "";
+            var lastName = telegramMessage.From?.LastName ?? "";
+            var userName = string.IsNullOrEmpty(lastName) ? firstName : $"{firstName} {lastName}";
+
+            // Use username if available
+            if (!string.IsNullOrEmpty(telegramMessage.From?.Username))
+            {
+                userName = telegramMessage.From.Username;
+            }
+
+            // Extract message content
+            string messageText;
+
+            // Process text messages
+            if (!string.IsNullOrEmpty(telegramMessage.Text))
+            {
+                messageText = telegramMessage.Text;
+            }
+            // Process caption from media messages
+            else if (!string.IsNullOrEmpty(telegramMessage.Caption))
+            {
+                messageText = telegramMessage.Caption;
+            }
+            // Handle other message types
+            else if (telegramMessage.Sticker != null)
+            {
+                messageText = $"[Sticker: {telegramMessage.Sticker.Emoji}]";
+            }
+            else if (telegramMessage.Animation != null)
+            {
+                messageText = "[GIF]";
+            }
+            else if (telegramMessage.Video != null)
+            {
+                messageText = "[Video]";
+            }
+            else if (telegramMessage.Audio != null)
+            {
+                messageText = "[Audio]";
+            }
+            else if (telegramMessage.Voice != null)
+            {
+                messageText = "[Voice Message]";
+            }
+            else if (telegramMessage.Document != null)
+            {
+                messageText = $"[Document: {telegramMessage.Document.FileName}]";
+            }
+            else if (telegramMessage.Location != null)
+            {
+                messageText = $"[Location: {telegramMessage.Location.Latitude}, {telegramMessage.Location.Longitude}]";
+            }
+            else if (telegramMessage.Poll != null)
+            {
+                messageText = $"[Poll: {telegramMessage.Poll.Question}]";
+            }
+            else if (telegramMessage.Photo != null && telegramMessage.Photo.Length > 0)
+            {
+                messageText = "[Photo]";
+            }
+            else
+            {
+                messageText = "[Unsupported message type]";
+            }
+
+            // Create message object
+            var message = new Models.Message
+            {
+                Content = messageText,
+                SenderName = userName,
+                SenderId = userId,
+                Source = MessageSource.Telegram,
+                Timestamp = telegramMessage.Date.ToLocalTime(),
+                AvatarUrl = await GetTelegramAvatarUrlAsync(telegramMessage.From, _botClient, _cts.Token)
+            };
+
+            // If the message contains a photo, get the URL
+            if (telegramMessage.Photo != null && telegramMessage.Photo.Length > 0)
+            {
+                var fileId = telegramMessage.Photo[^1].FileId;
+                var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
+                var token = _configuration["Telegram:BotToken"];
+                message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+            }
+            // If the message contains a sticker, get the URL
+            else if (telegramMessage.Sticker != null && telegramMessage.Sticker.IsAnimated == false)
+            {
+                var fileId = telegramMessage.Sticker.FileId;
+                var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
+                var token = _configuration["Telegram:BotToken"];
+                message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+            }
+
+            _logger.LogInformation("Received message from Telegram: {Message}", messageText);
+            MessageReceived?.Invoke(this, message);
         }
+
+
+
+
 
         /// <summary>
         /// Gets the avatar URL for a Telegram user
