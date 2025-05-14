@@ -112,7 +112,7 @@ For more detailed update instructions, see [UPDATE.md](UPDATE.md).
   "Telegram": {
     "BotToken": "your_telegram_bot_token_here",
     "ChatId": "your_telegram_chat_id_here",
-    "WebhookUrl": "https://your-domain.com:8443/telegram-webhook",
+    "WebhookUrl": "https://your-domain.com:8443",
     "WebhookPort": "8443"
   },
   "Debug": {
@@ -185,7 +185,8 @@ You can use either Discord Bot API or Webhook for Discord integration:
 3. (Optional) Set up a webhook for real-time message delivery:
    - Set up a publicly accessible HTTPS server (required for webhooks)
    - Configure your domain to point to your server
-   - Set the webhook URL in the configuration
+   - Set the webhook URL in the configuration (e.g., `https://your-domain.com:8443`)
+   - The path part of the URL is optional and will be used as the webhook endpoint
    - Optionally set a custom port for the webhook listener (default: 8443)
    - The application will automatically set up the webhook with Telegram
    - This provides faster and more reliable message delivery than polling
@@ -223,7 +224,7 @@ All parameters are required for their respective platforms. The application will
 
 - `--telegram-bot-token`: Your Telegram bot token
 - `--telegram-chat-id`: Your Telegram chat ID
-- `--telegram-webhook-url`: (Optional) Your Telegram webhook URL for real-time message delivery
+- `--telegram-webhook-url`: (Optional) Your Telegram webhook URL for real-time message delivery (e.g., `https://your-domain.com:8443`)
 - `--telegram-webhook-port`: (Optional) Custom port for Telegram webhook listener (default: 8443)
 
 #### Debug Parameters

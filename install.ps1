@@ -259,7 +259,7 @@ if ($configureNow -ne "Y" -and $configureNow -ne "y") {
   "Telegram": {
     "BotToken": "your_telegram_bot_token_here",
     "ChatId": "your_telegram_chat_id_here",
-    "WebhookUrl": "https://your-domain.com:8443/telegram-webhook",
+    "WebhookUrl": "https://your-domain.com:8443",
     "WebhookPort": "8443"
   },
   "Debug": {

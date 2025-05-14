@@ -30,7 +30,7 @@ namespace DC.QQ.TG.Adapters
 
         // Webhook related fields
         private string _webhookUrl;
-        private readonly string _webhookPath = "/telegram-webhook";
+        private string _webhookPath = ""; // Default to empty path, will be extracted from URL
         private int _webhookPort = 8443; // Default Telegram webhook port
         private HttpListener _httpListener;
         private bool _useWebhook;
@@ -60,6 +60,22 @@ namespace DC.QQ.TG.Adapters
             {
                 _webhookPort = port;
                 _logger.LogInformation("Using custom webhook port: {Port}", _webhookPort);
+            }
+
+            // Extract path from webhook URL if it's set
+            if (!string.IsNullOrEmpty(_webhookUrl))
+            {
+                try
+                {
+                    var uri = new Uri(_webhookUrl);
+                    _webhookPath = uri.AbsolutePath;
+                    _logger.LogInformation("Using webhook path from URL: {Path}", _webhookPath);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to extract path from webhook URL, using empty path");
+                    _webhookPath = "";
+                }
             }
 
             if (string.IsNullOrEmpty(botToken) || string.IsNullOrEmpty(_chatId))
@@ -155,6 +171,9 @@ namespace DC.QQ.TG.Adapters
                         _logger.LogInformation("Adding port to webhook URL: {WebhookUrl}", webhookUrlWithPort);
                     }
 
+                    // Log the path being used
+                    _logger.LogInformation("Using webhook path: {Path}", webhookUri.AbsolutePath);
+
                     await _botClient.SetWebhook(webhookUrlWithPort);
 
                     // Start the webhook listener
@@ -203,7 +222,16 @@ namespace DC.QQ.TG.Adapters
                     port = _webhookPort;
                 }
 
-                string prefix = $"{uri.Scheme}://{uri.Host}:{port}{_webhookPath}/";
+                // Use the path from the URL or the default path
+                string path = string.IsNullOrEmpty(_webhookPath) ? "/" : _webhookPath;
+
+                // Ensure the path ends with a slash for the HTTP listener
+                if (!path.EndsWith("/"))
+                {
+                    path += "/";
+                }
+
+                string prefix = $"{uri.Scheme}://{uri.Host}:{port}{path}";
 
                 _logger.LogInformation("Starting HTTP listener on {Prefix}", prefix);
                 _httpListener.Prefixes.Add(prefix);
@@ -425,6 +453,9 @@ namespace DC.QQ.TG.Adapters
                         webhookUrlWithPort = $"{webhookUri.Scheme}://{webhookUri.Host}:{_webhookPort}{webhookUri.PathAndQuery}";
                         result.AppendLine($"- Adding port to webhook URL: {webhookUrlWithPort}");
                     }
+
+                    // Log the path being used
+                    result.AppendLine($"- Using webhook path: {webhookUri.AbsolutePath}");
 
                     // Set the webhook
                     await _botClient.SetWebhook(webhookUrlWithPort, cancellationToken: cts.Token);
