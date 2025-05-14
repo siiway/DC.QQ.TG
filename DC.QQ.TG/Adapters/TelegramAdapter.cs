@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using DC.QQ.TG.Interfaces;
@@ -140,6 +141,68 @@ namespace DC.QQ.TG.Adapters
 
             _logger.LogInformation("Telegram adapter stopped listening");
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Gets recent messages from the Telegram chat for debugging purposes
+        /// </summary>
+        /// <param name="limit">Maximum number of messages to retrieve (default: 10)</param>
+        /// <returns>A string containing the recent messages</returns>
+        public async Task<string> GetRecentMessagesAsync(int limit = 10)
+        {
+            try
+            {
+                if (_botClient == null)
+                {
+                    return "Telegram bot client is not initialized.";
+                }
+
+                _logger.LogInformation("Retrieving {Limit} recent messages from Telegram chat {ChatId}", limit, _chatId);
+
+                // Create a new cancellation token source for this operation
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30)); // 30 second timeout
+
+                // Get chat history
+                // In Telegram.Bot 22.5.1, we need to use GetChatHistory instead of GetUpdatesAsync
+                var chatId = long.Parse(_chatId);
+                var messages = new List<TelegramMessage>();
+
+                // Get chat info
+                try
+                {
+                    var history = await _botClient.GetChat(chatId, cts.Token);
+                    _logger.LogInformation("Successfully retrieved chat info: {ChatTitle} ({ChatType})",
+                        history.Title ?? history.Username,
+                        history.Type);
+
+                    // Send a message to the chat for debugging
+                    await _botClient.SendMessage(
+                        chatId: _chatId,
+                        text: "Retrieving chat info for debugging...",
+                        cancellationToken: cts.Token
+                    );
+
+                    // Return chat info
+                    return $"Chat info: {history.Title ?? history.Username} ({history.Type})\n\n" +
+                           $"Chat ID: {history.Id}\n" +
+                           $"Chat Type: {history.Type}\n" +
+                           $"Username: {history.Username ?? "N/A"}\n" +
+                           $"Title: {history.Title ?? "N/A"}\n" +
+                           $"Description: {history.Description ?? "N/A"}\n\n" +
+                           "Note: Direct message history retrieval is not available in this version of Telegram.Bot.\n" +
+                           "Please check the Telegram chat directly to see recent messages.";
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error retrieving chat info");
+                    return $"Error retrieving chat info: {ex.Message}";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving recent messages from Telegram");
+                return $"Error retrieving messages: {ex.Message}";
+            }
         }
 
         private Task OnErrorReceived(Exception exception, HandleErrorSource source)
@@ -292,10 +355,6 @@ namespace DC.QQ.TG.Adapters
             _logger.LogInformation("Received message from Telegram: {Message}", messageText);
             MessageReceived?.Invoke(this, message);
         }
-
-
-
-
 
         /// <summary>
         /// Gets the avatar URL for a Telegram user

@@ -177,6 +177,11 @@ namespace DC.QQ.TG.Services
                             await GetRecentMessages();
                             AnsiConsole.Markup("[blue]debug-shell>[/] ");
                             break;
+                        case "tgmsgs":
+                        case "telegram":
+                            await GetTelegramMessages();
+                            AnsiConsole.Markup("[blue]debug-shell>[/] ");
+                            break;
                         case "clear":
                         case "cls":
                             Console.Clear();
@@ -306,6 +311,39 @@ namespace DC.QQ.TG.Services
             AnsiConsole.Write(table);
         }
 
+        private async Task GetTelegramMessages()
+        {
+            try
+            {
+                // Find the Telegram adapter
+                var telegramAdapter = _adapters.FirstOrDefault(a => a.Platform == Models.MessageSource.Telegram);
+
+                if (telegramAdapter == null)
+                {
+                    AnsiConsole.MarkupLine("[red]Telegram adapter not found.[/]");
+                    return;
+                }
+
+                // Check if the adapter is a TelegramAdapter
+                if (telegramAdapter is not Adapters.TelegramAdapter tgAdapter)
+                {
+                    AnsiConsole.MarkupLine("[red]The adapter is not a TelegramAdapter.[/]");
+                    return;
+                }
+
+                // Get recent messages
+                AnsiConsole.MarkupLine("[yellow]Retrieving Telegram chat info...[/]");
+                string result = await tgAdapter.GetRecentMessagesAsync();
+
+                // Display the result
+                AnsiConsole.MarkupLine(result);
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[red]Error retrieving Telegram messages: {ex.Message.Replace("[", "[[").Replace("]", "]]")}[/]");
+            }
+        }
+
         private string GetLogLevelColor(LogLevel logLevel)
         {
             return logLevel switch
@@ -338,6 +376,7 @@ namespace DC.QQ.TG.Services
             table.AddRow("set <name> <value>", "Set the value of a variable");
             table.AddRow("messages, msgs", "Show the 10 most recent messages");
             table.AddRow("get messages <count>", "Show the specified number of recent messages");
+            table.AddRow("tgmsgs, telegram", "Get Telegram chat info and messages (for debugging)");
             table.AddRow("clear, cls", "Clear the console screen");
 
             AnsiConsole.Write(table);
