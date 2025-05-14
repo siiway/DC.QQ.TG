@@ -31,6 +31,7 @@ namespace DC.QQ.TG.Adapters
         // Webhook related fields
         private string _webhookUrl;
         private readonly string _webhookPath = "/telegram-webhook";
+        private int _webhookPort = 8443; // Default Telegram webhook port
         private HttpListener _httpListener;
         private bool _useWebhook;
 
@@ -53,6 +54,13 @@ namespace DC.QQ.TG.Adapters
             _chatId = _configuration["Telegram:ChatId"];
             _webhookUrl = _configuration["Telegram:WebhookUrl"];
             _useWebhook = !string.IsNullOrEmpty(_webhookUrl);
+
+            // Get webhook port from configuration or use default
+            if (int.TryParse(_configuration["Telegram:WebhookPort"], out int port))
+            {
+                _webhookPort = port;
+                _logger.LogInformation("Using custom webhook port: {Port}", _webhookPort);
+            }
 
             if (string.IsNullOrEmpty(botToken) || string.IsNullOrEmpty(_chatId))
             {
@@ -172,9 +180,18 @@ namespace DC.QQ.TG.Adapters
                 // Create HTTP listener
                 _httpListener = new HttpListener();
 
-                // Extract hostname and port from webhook URL
+                // Extract hostname from webhook URL
                 var uri = new Uri(_webhookUrl);
-                string prefix = $"{uri.Scheme}://{uri.Host}:{uri.Port}{_webhookPath}/";
+
+                // Use the configured port instead of the one in the URL if it's different
+                int port = uri.Port;
+                if (port != _webhookPort && _webhookPort != 0)
+                {
+                    _logger.LogInformation("Using custom port {CustomPort} instead of URL port {UrlPort}", _webhookPort, uri.Port);
+                    port = _webhookPort;
+                }
+
+                string prefix = $"{uri.Scheme}://{uri.Host}:{port}{_webhookPath}/";
 
                 _logger.LogInformation("Starting HTTP listener on {Prefix}", prefix);
                 _httpListener.Prefixes.Add(prefix);
