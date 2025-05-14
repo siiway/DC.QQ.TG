@@ -111,7 +111,8 @@ For more detailed update instructions, see [UPDATE.md](UPDATE.md).
   },
   "Telegram": {
     "BotToken": "your_telegram_bot_token_here",
-    "ChatId": "your_telegram_chat_id_here"
+    "ChatId": "your_telegram_chat_id_here",
+    "WebhookUrl": "https://your-domain.com/telegram-webhook"
   },
   "Debug": {
     "ShowNapCatResponse": false,
@@ -180,6 +181,12 @@ You can use either Discord Bot API or Webhook for Discord integration:
    - Send a message to the bot
    - Visit `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
    - Find the `chat` object and copy the `id` value
+3. (Optional) Set up a webhook for real-time message delivery:
+   - Set up a publicly accessible HTTPS server (required for webhooks)
+   - Configure your domain to point to your server
+   - Set the webhook URL in the configuration
+   - The application will automatically set up the webhook with Telegram
+   - This provides faster and more reliable message delivery than polling
 
 ## Running the Application
 
@@ -214,6 +221,7 @@ All parameters are required for their respective platforms. The application will
 
 - `--telegram-bot-token`: Your Telegram bot token
 - `--telegram-chat-id`: Your Telegram chat ID
+- `--telegram-webhook-url`: (Optional) Your Telegram webhook URL for real-time message delivery
 
 #### Debug Parameters
 
@@ -253,6 +261,7 @@ When the debug shell is enabled, you can use the following commands:
 - `set <name> <value>`: Set the value of a variable
 - `messages`, `msgs`: Show the 10 most recent messages
 - `get messages <count>`: Show the specified number of recent messages
+- `tgmsgs`, `telegram`: Get Telegram chat info and debug information
 
 Example:
 
