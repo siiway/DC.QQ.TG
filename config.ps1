@@ -279,10 +279,34 @@ if ($disable_telegram -ne "true") {
     $use_webhook = Read-Host "Do you want to use a webhook for Telegram? (Y/N, default: N)"
     if ($use_webhook -eq "Y" -or $use_webhook -eq "y") {
         Write-ColorOutput "Note: Telegram webhooks require a publicly accessible HTTPS server." "Yellow"
+        Write-ColorOutput "Important: The webhook URL must use HTTPS (Telegram requirement)" "Yellow"
         Write-ColorOutput "Important: Include the port in your webhook URL if using a non-standard port (e.g., https://your-domain.com:8443)" "Yellow"
         Write-ColorOutput "Note: The path part of the URL is optional and will be used as the webhook endpoint" "Yellow"
+        Write-ColorOutput "Note: Telegram only allows webhooks on ports 443, 80, 88, and 8443" "Yellow"
         $telegram_webhook_url = Get-ConfigValue -Prompt "Enter Telegram webhook URL (e.g., https://your-domain.com:8443)" -Default $telegram_webhook_url -IsSecret $true
         $telegram_webhook_port = Get-ConfigValue -Prompt "Enter Telegram webhook port (must match the port in your URL)" -Default $telegram_webhook_port
+
+        Write-ColorOutput "SSL Certificate Configuration (Optional)" "Cyan"
+        Write-ColorOutput "Note: You can provide a self-signed certificate for your webhook" "Yellow"
+        Write-ColorOutput "Note: The certificate must be in PEM format" "Yellow"
+        Write-ColorOutput "Note: Place your certificate in a secure location accessible to the application" "Yellow"
+        $telegram_certificate_path = Get-ConfigValue -Prompt "Enter path to SSL certificate (leave empty if not using)" -Default $telegram_certificate_path
+
+        if (-not [string]::IsNullOrEmpty($telegram_certificate_path)) {
+            if (Test-Path $telegram_certificate_path) {
+                Write-ColorOutput "Certificate found at: $telegram_certificate_path" "Green"
+                $telegram_certificate_password = Get-ConfigValue -Prompt "Enter certificate password (leave empty if none)" -Default $telegram_certificate_password -IsSecret $true
+            } else {
+                Write-ColorOutput "Warning: Certificate not found at: $telegram_certificate_path" "Red"
+                $continue = Read-Host "Do you want to continue anyway? (Y/N, default: N)"
+                if ($continue -ne "Y" -and $continue -ne "y") {
+                    $telegram_certificate_path = ""
+                } else {
+                    Write-ColorOutput "You can still save this path, but make sure to place the certificate there before running the application" "Yellow"
+                    $telegram_certificate_password = Get-ConfigValue -Prompt "Enter certificate password (leave empty if none)" -Default $telegram_certificate_password -IsSecret $true
+                }
+            }
+        }
     }
 }
 
@@ -324,7 +348,9 @@ $configJson = @"
     "BotToken": "$telegram_bot_token",
     "ChatId": "$telegram_chat_id",
     "WebhookUrl": "$telegram_webhook_url",
-    "WebhookPort": "$telegram_webhook_port"
+    "WebhookPort": "$telegram_webhook_port",
+    "CertificatePath": "$telegram_certificate_path",
+    "CertificatePassword": "$telegram_certificate_password"
   },
   "Disabled": {
     "QQ": "$disable_qq",

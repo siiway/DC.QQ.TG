@@ -59,6 +59,8 @@ namespace DC.QQ.TG.Services
             _shellVariables["telegram_chat"] = _configuration["Telegram:ChatId"] ?? string.Empty;
             _shellVariables["telegram_webhook_url"] = _configuration["Telegram:WebhookUrl"] ?? string.Empty;
             _shellVariables["telegram_webhook_port"] = _configuration["Telegram:WebhookPort"] ?? "8443";
+            _shellVariables["telegram_certificate_path"] = _configuration["Telegram:CertificatePath"] ?? string.Empty;
+            _shellVariables["telegram_certificate_password"] = _configuration["Telegram:CertificatePassword"] ?? string.Empty;
             _shellVariables["napcat_url"] = _configuration["NapCat:BaseUrl"] ?? string.Empty;
             _shellVariables["napcat_token"] = _configuration["NapCat:Token"] ?? string.Empty;
             _shellVariables["qq_group"] = _configuration["NapCat:GroupId"] ?? string.Empty;
@@ -530,6 +532,8 @@ namespace DC.QQ.TG.Services
                 "telegram_chat" => "Telegram:ChatId",
                 "telegram_webhook_url" => "Telegram:WebhookUrl",
                 "telegram_webhook_port" => "Telegram:WebhookPort",
+                "telegram_certificate_path" => "Telegram:CertificatePath",
+                "telegram_certificate_password" => "Telegram:CertificatePassword",
                 "napcat_url" => "NapCat:BaseUrl",
                 "napcat_token" => "NapCat:Token",
                 "qq_group" => "NapCat:GroupId",

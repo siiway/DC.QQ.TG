@@ -113,7 +113,9 @@ For more detailed update instructions, see [UPDATE.md](UPDATE.md).
     "BotToken": "your_telegram_bot_token_here",
     "ChatId": "your_telegram_chat_id_here",
     "WebhookUrl": "https://your-domain.com:8443",
-    "WebhookPort": "8443"
+    "WebhookPort": "8443",
+    "CertificatePath": "path/to/your/certificate.pem",
+    "CertificatePassword": "certificate_password_if_needed"
   },
   "Debug": {
     "ShowNapCatResponse": false,
@@ -186,8 +188,12 @@ You can use either Discord Bot API or Webhook for Discord integration:
    - Set up a publicly accessible HTTPS server (required for webhooks)
    - Configure your domain to point to your server
    - Set the webhook URL in the configuration (e.g., `https://your-domain.com:8443`)
+   - **Important**: The webhook URL must use HTTPS (Telegram requirement)
    - The path part of the URL is optional and will be used as the webhook endpoint
    - Optionally set a custom port for the webhook listener (default: 8443)
+   - Telegram only allows webhooks on ports 443, 80, 88, and 8443
+   - (Optional) Provide a path to your SSL certificate file (PEM format) in `CertificatePath`
+   - (Optional) If your certificate is password-protected, provide the password in `CertificatePassword`
    - The application will automatically set up the webhook with Telegram
    - This provides faster and more reliable message delivery than polling
 
@@ -226,6 +232,8 @@ All parameters are required for their respective platforms. The application will
 - `--telegram-chat-id`: Your Telegram chat ID
 - `--telegram-webhook-url`: (Optional) Your Telegram webhook URL for real-time message delivery (e.g., `https://your-domain.com:8443`)
 - `--telegram-webhook-port`: (Optional) Custom port for Telegram webhook listener (default: 8443)
+- `--telegram-certificate-path`: (Optional) Path to your SSL certificate file for Telegram webhook
+- `--telegram-certificate-password`: (Optional) Password for your SSL certificate if it's password-protected
 
 #### Debug Parameters
 

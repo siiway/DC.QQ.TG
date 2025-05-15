@@ -246,10 +246,34 @@ if [[ "$disable_telegram" != "true" ]]; then
     read -p "Do you want to use a webhook for Telegram? (Y/N, default: N): " use_webhook
     if [[ "$use_webhook" == "Y" || "$use_webhook" == "y" ]]; then
         print_color "$YELLOW" "Note: Telegram webhooks require a publicly accessible HTTPS server."
+        print_color "$YELLOW" "Important: The webhook URL must use HTTPS (Telegram requirement)"
         print_color "$YELLOW" "Important: Include the port in your webhook URL if using a non-standard port (e.g., https://your-domain.com:8443)"
         print_color "$YELLOW" "Note: The path part of the URL is optional and will be used as the webhook endpoint"
+        print_color "$YELLOW" "Note: Telegram only allows webhooks on ports 443, 80, 88, and 8443"
         telegram_webhook_url=$(ask_config "Enter Telegram webhook URL (e.g., https://your-domain.com:8443)" "$telegram_webhook_url" "true")
         telegram_webhook_port=$(ask_config "Enter Telegram webhook port (must match the port in your URL)" "$telegram_webhook_port" "false")
+
+        print_color "$CYAN" "SSL Certificate Configuration (Optional)"
+        print_color "$YELLOW" "Note: You can provide a self-signed certificate for your webhook"
+        print_color "$YELLOW" "Note: The certificate must be in PEM format"
+        print_color "$YELLOW" "Note: Place your certificate in a secure location accessible to the application"
+        telegram_certificate_path=$(ask_config "Enter path to SSL certificate (leave empty if not using)" "$telegram_certificate_path" "false")
+
+        if [ ! -z "$telegram_certificate_path" ]; then
+            if [ -f "$telegram_certificate_path" ]; then
+                print_color "$GREEN" "Certificate found at: $telegram_certificate_path"
+                telegram_certificate_password=$(ask_config "Enter certificate password (leave empty if none)" "$telegram_certificate_password" "true")
+            else
+                print_color "$RED" "Warning: Certificate not found at: $telegram_certificate_path"
+                read -p "Do you want to continue anyway? (Y/N, default: N): " continue
+                if [[ "$continue" != "Y" && "$continue" != "y" ]]; then
+                    telegram_certificate_path=""
+                else
+                    print_color "$YELLOW" "You can still save this path, but make sure to place the certificate there before running the application"
+                    telegram_certificate_password=$(ask_config "Enter certificate password (leave empty if none)" "$telegram_certificate_password" "true")
+                fi
+            fi
+        fi
     fi
 fi
 
@@ -291,7 +315,9 @@ cat > "$config_path" << EOF
     "BotToken": "$telegram_bot_token",
     "ChatId": "$telegram_chat_id",
     "WebhookUrl": "$telegram_webhook_url",
-    "WebhookPort": "$telegram_webhook_port"
+    "WebhookPort": "$telegram_webhook_port",
+    "CertificatePath": "$telegram_certificate_path",
+    "CertificatePassword": "$telegram_certificate_password"
   },
   "Disabled": {
     "QQ": "$disable_qq",

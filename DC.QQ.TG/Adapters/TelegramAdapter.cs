@@ -32,6 +32,8 @@ namespace DC.QQ.TG.Adapters
         private string _webhookUrl;
         private string _webhookPath = ""; // Default to empty path, will be extracted from URL
         private int _webhookPort = 8443; // Default Telegram webhook port
+        private string _certificatePath; // Path to SSL certificate file
+        private string _certificatePassword; // Password for SSL certificate
         private HttpListener _httpListener;
         private bool _useWebhook;
 
@@ -53,13 +55,52 @@ namespace DC.QQ.TG.Adapters
             var botToken = _configuration["Telegram:BotToken"];
             _chatId = _configuration["Telegram:ChatId"];
             _webhookUrl = _configuration["Telegram:WebhookUrl"];
-            _useWebhook = !string.IsNullOrEmpty(_webhookUrl);
+
+            // Validate webhook URL if provided
+            if (!string.IsNullOrEmpty(_webhookUrl))
+            {
+                if (!Uri.TryCreate(_webhookUrl, UriKind.Absolute, out Uri uri))
+                {
+                    _logger.LogWarning("Invalid webhook URL: {WebhookUrl}. Webhook will not be used.", _webhookUrl);
+                    _useWebhook = false;
+                }
+                else if (uri.Scheme != "https")
+                {
+                    _logger.LogWarning("Webhook URL must use HTTPS: {WebhookUrl}. Webhook will not be used.", _webhookUrl);
+                    _useWebhook = false;
+                }
+                else
+                {
+                    _useWebhook = true;
+                    _logger.LogInformation("Using webhook for Telegram: {WebhookUrl}", _webhookUrl);
+                }
+            }
+            else
+            {
+                _useWebhook = false;
+            }
 
             // Get webhook port from configuration or use default
             if (int.TryParse(_configuration["Telegram:WebhookPort"], out int port))
             {
                 _webhookPort = port;
                 _logger.LogInformation("Using custom webhook port: {Port}", _webhookPort);
+            }
+
+            // Get certificate path and password from configuration
+            _certificatePath = _configuration["Telegram:CertificatePath"];
+            _certificatePassword = _configuration["Telegram:CertificatePassword"];
+
+            if (!string.IsNullOrEmpty(_certificatePath))
+            {
+                if (File.Exists(_certificatePath))
+                {
+                    _logger.LogInformation("Using SSL certificate from: {CertificatePath}", _certificatePath);
+                }
+                else
+                {
+                    _logger.LogWarning("SSL certificate file not found at: {CertificatePath}", _certificatePath);
+                }
             }
 
             // Extract path from webhook URL if it's set
@@ -158,9 +199,22 @@ namespace DC.QQ.TG.Adapters
                     // Set up webhook
                     _logger.LogInformation("Setting up Telegram webhook at {WebhookUrl}", _webhookUrl);
 
+                    // Validate webhook URL
+                    if (!Uri.TryCreate(_webhookUrl, UriKind.Absolute, out Uri webhookUri))
+                    {
+                        _logger.LogError("Invalid webhook URL: {WebhookUrl}", _webhookUrl);
+                        throw new InvalidOperationException($"Invalid webhook URL: {_webhookUrl}");
+                    }
+
+                    // Check if the URL uses HTTPS
+                    if (webhookUri.Scheme != "https")
+                    {
+                        _logger.LogError("Webhook URL must use HTTPS: {WebhookUrl}", _webhookUrl);
+                        throw new InvalidOperationException($"Webhook URL must use HTTPS: {_webhookUrl}");
+                    }
+
                     // Set the webhook
                     // Make sure the webhook URL includes the port if it's not standard
-                    var webhookUri = new Uri(_webhookUrl);
                     string webhookUrlWithPort = _webhookUrl;
 
                     // If the URL doesn't include a port but we have a custom port configured
@@ -174,7 +228,35 @@ namespace DC.QQ.TG.Adapters
                     // Log the path being used
                     _logger.LogInformation("Using webhook path: {Path}", webhookUri.AbsolutePath);
 
-                    await _botClient.SetWebhook(webhookUrlWithPort);
+                    // Set the webhook with or without certificate
+                    if (!string.IsNullOrEmpty(_certificatePath) && File.Exists(_certificatePath))
+                    {
+                        try
+                        {
+                            // Load the certificate
+                            var certBytes = File.ReadAllBytes(_certificatePath);
+
+                            // Create an InputFile from the certificate bytes
+                            var inputFile = InputFile.FromStream(new MemoryStream(certBytes), "certificate.pem");
+
+                            // Set the webhook with the certificate
+                            _logger.LogInformation("Setting webhook with certificate from {CertificatePath}", _certificatePath);
+                            await _botClient.SetWebhook(
+                                url: webhookUrlWithPort,
+                                certificate: inputFile
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to load or use certificate, falling back to standard webhook");
+                            await _botClient.SetWebhook(webhookUrlWithPort);
+                        }
+                    }
+                    else
+                    {
+                        // Set the webhook without certificate
+                        await _botClient.SetWebhook(webhookUrlWithPort);
+                    }
 
                     // Start the webhook listener
                     await StartWebhookListenerAsync();
@@ -226,7 +308,7 @@ namespace DC.QQ.TG.Adapters
                 string path = string.IsNullOrEmpty(_webhookPath) ? "/" : _webhookPath;
 
                 // Ensure the path ends with a slash for the HTTP listener
-                if (!path.EndsWith("/"))
+                if (!path.EndsWith('/'))
                 {
                     path += "/";
                 }
@@ -381,6 +463,22 @@ namespace DC.QQ.TG.Adapters
                     return result.ToString();
                 }
 
+                // Validate webhook URL
+                if (!Uri.TryCreate(_webhookUrl, UriKind.Absolute, out Uri webhookUri))
+                {
+                    result.AppendLine($"Invalid webhook URL: {_webhookUrl}");
+                    result.AppendLine("The URL must be a valid absolute URL (e.g., https://example.com:8443)");
+                    return result.ToString();
+                }
+
+                // Check if the URL uses HTTPS
+                if (webhookUri.Scheme != "https")
+                {
+                    result.AppendLine($"Webhook URL must use HTTPS: {_webhookUrl}");
+                    result.AppendLine("Telegram requires HTTPS for webhook URLs");
+                    return result.ToString();
+                }
+
                 // Get current webhook info
                 var webhookInfo = await _botClient.GetWebhookInfo(cts.Token);
 
@@ -442,8 +540,7 @@ namespace DC.QQ.TG.Adapters
 
                 try
                 {
-                    // Make sure the webhook URL includes the port if it's not standard
-                    var webhookUri = new Uri(_webhookUrl);
+                    // We already have webhookUri from the validation above
                     string webhookUrlWithPort = _webhookUrl;
 
                     // If the URL doesn't include a port but we have a custom port configured
@@ -457,9 +554,47 @@ namespace DC.QQ.TG.Adapters
                     // Log the path being used
                     result.AppendLine($"- Using webhook path: {webhookUri.AbsolutePath}");
 
-                    // Set the webhook
-                    await _botClient.SetWebhook(webhookUrlWithPort, cancellationToken: cts.Token);
-                    result.AppendLine("- Successfully set webhook");
+                    // Check if we have a certificate
+                    if (!string.IsNullOrEmpty(_certificatePath) && File.Exists(_certificatePath))
+                    {
+                        result.AppendLine($"- Found certificate at: {_certificatePath}");
+
+                        try
+                        {
+                            // Load the certificate
+                            var certBytes = File.ReadAllBytes(_certificatePath);
+
+                            // Create an InputFile from the certificate bytes
+                            var inputFile = InputFile.FromStream(new MemoryStream(certBytes), "certificate.pem");
+
+                            // Set the webhook with the certificate
+                            result.AppendLine("- Setting webhook with certificate");
+                            await _botClient.SetWebhook(
+                                url: webhookUrlWithPort,
+                                certificate: inputFile,
+                                cancellationToken: cts.Token
+                            );
+                            result.AppendLine("- Successfully set webhook with certificate");
+                        }
+                        catch (Exception ex)
+                        {
+                            result.AppendLine($"- Failed to use certificate: {ex.Message}");
+                            result.AppendLine("- Falling back to standard webhook");
+                            await _botClient.SetWebhook(webhookUrlWithPort, cancellationToken: cts.Token);
+                            result.AppendLine("- Successfully set webhook without certificate");
+                        }
+                    }
+                    else
+                    {
+                        // Set the webhook without certificate
+                        if (!string.IsNullOrEmpty(_certificatePath))
+                        {
+                            result.AppendLine($"- Certificate not found at: {_certificatePath}");
+                        }
+
+                        await _botClient.SetWebhook(webhookUrlWithPort, cancellationToken: cts.Token);
+                        result.AppendLine("- Successfully set webhook without certificate");
+                    }
 
                     // Get updated webhook info
                     webhookInfo = await _botClient.GetWebhookInfo(cts.Token);

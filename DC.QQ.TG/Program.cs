@@ -43,6 +43,10 @@ namespace DC.QQ.TG
                 { "--telegram-bot-token", "Telegram:BotToken" },
                 { "--telegram-chat", "Telegram:ChatId" },
                 { "--telegram-chat-id", "Telegram:ChatId" },
+                { "--telegram-webhook-url", "Telegram:WebhookUrl" },
+                { "--telegram-webhook-port", "Telegram:WebhookPort" },
+                { "--telegram-certificate-path", "Telegram:CertificatePath" },
+                { "--telegram-certificate-password", "Telegram:CertificatePassword" },
 
                 // Platform control
                 { "--disable-telegram", "Disabled:Telegram" },
@@ -345,7 +349,7 @@ namespace DC.QQ.TG
                     {
                         services.AddSingleton<IMessageAdapter, TelegramAdapter>();
                     }
-                    
+
                     // idk but discord init will stop init process
                     // that's why we put it last
                     // hoping we can fix it later
