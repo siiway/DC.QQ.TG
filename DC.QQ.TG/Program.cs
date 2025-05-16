@@ -133,6 +133,18 @@ namespace DC.QQ.TG
             AnsiConsole.Write(successPanel);
 
             var host = CreateHostBuilder(args, switchMappings).Build();
+
+            // 注册应用程序退出事件，清理临时文件
+            AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
+            {
+                var loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
+                var logger = loggerFactory.CreateLogger<Program>();
+
+                logger.LogInformation("Application shutting down, cleaning up temporary files...");
+                FileDownloader.CleanupAllFiles(logger);
+                logger.LogInformation("Temporary files cleanup completed");
+            };
+
             await host.RunAsync();
         }
 

@@ -139,13 +139,14 @@ For more detailed update instructions, see [UPDATE.md](UPDATE.md).
 
 The application uses NapCat API to send images and files directly to QQ:
 
-- **Images**: Images from Discord and Telegram are sent to QQ using the NapCat API's image message type
-- **Files**: Files from Discord and Telegram are sent to QQ using the NapCat API's file message type
+- **Images**: Images from Discord and Telegram are sent to QQ using the NapCat API's image message type with proper summary
+- **Files**: Files from Discord and Telegram are sent to QQ using the NapCat API's file message type with proper file names
 - Supported file sources include:
   - Network URLs (http:// or https://)
   - Local file paths (file://)
   - Base64 encoded data
 - File types are automatically detected based on file extensions
+- When receiving images and files from QQ, the application properly extracts URLs and file information
 
 ### Discord Setup
 
@@ -360,6 +361,32 @@ The application uses a modular architecture with adapters for each platform:
 - `TelegramAdapter`: Uses Telegram Bot API for Telegram integration
 
 The `MessageService` coordinates between the adapters, ensuring messages are properly synchronized across platforms.
+
+## Security Considerations
+
+- **Discord**: Store your bot token and webhook URL securely
+- **Telegram**: Store your bot token securely
+- **QQ**: Store your NapCat token securely
+
+### File Handling
+
+- Files from all platforms (Discord, Telegram, QQ) are downloaded to a temporary directory
+- This approach prevents exposing sensitive tokens in URLs and ensures consistent file handling
+- Temporary files are automatically deleted after 30 minutes
+- All temporary files are also cleaned up when the application exits
+- When file downloads fail, the application displays a formatted error message:
+
+  ```text
+  [FILE]
+  <file type>: <file name>
+  code: <error code>
+  ```
+
+  instead of falling back to original URLs
+- This prevents sensitive information from being exposed in error cases
+
+> [!WARNING]
+> Never commit sensitive tokens to version control!
 
 ## License
 

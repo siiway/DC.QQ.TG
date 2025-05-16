@@ -267,19 +267,90 @@ namespace DC.QQ.TG.Adapters
                     // 添加图片 URL（如果有）
                     if (!string.IsNullOrEmpty(_lastImageUrl))
                     {
-                        qqMessage.ImageUrl = _lastImageUrl;
-                        _logger.LogInformation("Added image URL to QQ message: {Url}", _lastImageUrl);
+                        string originalImageUrl = _lastImageUrl;
+                        qqMessage.ImageUrl = originalImageUrl;
+                        _logger.LogInformation("Added image URL to QQ message: {Url}", originalImageUrl);
+
+                        // 异步下载图片，但不等待完成，让消息处理继续进行
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                // 下载图片到临时目录
+                                string localUrl = await FileDownloader.DownloadFileAsync(
+                                    originalImageUrl,
+                                    $"qq_image_{DateTime.Now.Ticks}.jpg",
+                                    _logger);
+
+                                // 更新消息对象的 ImageUrl
+                                qqMessage.ImageUrl = localUrl;
+                                _logger.LogDebug("QQ image downloaded to: {LocalUrl}", localUrl);
+
+                                // 重新触发消息事件，以便其他适配器能够使用本地文件
+                                MessageReceived?.Invoke(this, qqMessage);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Failed to download QQ image: {Url}", originalImageUrl);
+
+                                // 如果下载失败，使用友好的错误消息而不是原始 URL
+                                string errorCode = ex.HResult.ToString("X8");
+                                qqMessage.Content += $"\n[FILE]\nImage: QQ Image\ncode: {errorCode}";
+                                qqMessage.ImageUrl = null; // 清除图片 URL
+
+                                // 重新触发消息事件
+                                MessageReceived?.Invoke(this, qqMessage);
+                            }
+                        });
+
                         _lastImageUrl = null; // 清除，避免重复使用
                     }
 
                     // 添加文件 URL（如果有）
                     if (!string.IsNullOrEmpty(_lastFileUrl))
                     {
-                        qqMessage.FileUrl = _lastFileUrl;
-                        qqMessage.FileName = _lastFileName;
-                        qqMessage.FileType = _lastFileType;
+                        string originalFileUrl = _lastFileUrl;
+                        string originalFileName = _lastFileName;
+                        string originalFileType = _lastFileType;
+
+                        qqMessage.FileUrl = originalFileUrl;
+                        qqMessage.FileName = originalFileName;
+                        qqMessage.FileType = originalFileType;
                         _logger.LogInformation("Added file URL to QQ message: {FileName}, {FileType}, {Url}",
-                            _lastFileName, _lastFileType, _lastFileUrl);
+                            originalFileName, originalFileType, originalFileUrl);
+
+                        // 异步下载文件，但不等待完成，让消息处理继续进行
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                // 下载文件到临时目录
+                                string localUrl = await FileDownloader.DownloadFileAsync(
+                                    originalFileUrl,
+                                    originalFileName,
+                                    _logger);
+
+                                // 更新消息对象的 FileUrl
+                                qqMessage.FileUrl = localUrl;
+                                _logger.LogDebug("QQ file downloaded to: {LocalUrl}", localUrl);
+
+                                // 重新触发消息事件，以便其他适配器能够使用本地文件
+                                MessageReceived?.Invoke(this, qqMessage);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Failed to download QQ file: {Url}", originalFileUrl);
+
+                                // 如果下载失败，使用友好的错误消息而不是原始 URL
+                                string errorCode = ex.HResult.ToString("X8");
+                                string fileType = qqMessage.FileType ?? "File";
+                                qqMessage.Content += $"\n[FILE]\n{fileType}: {originalFileName}\ncode: {errorCode}";
+                                qqMessage.FileUrl = null; // 清除文件 URL
+
+                                // 重新触发消息事件
+                                MessageReceived?.Invoke(this, qqMessage);
+                            }
+                        });
 
                         // 清除，避免重复使用
                         _lastFileUrl = null;
@@ -723,7 +794,8 @@ namespace DC.QQ.TG.Adapters
                         type = "image",
                         data = new
                         {
-                            file = imageUrl
+                            file = imageUrl,
+                            summary = "[图片]"  // 添加摘要，按照 NapCat API 文档
                         }
                     }
                 };
@@ -1063,6 +1135,7 @@ namespace DC.QQ.TG.Adapters
 
                                 case "image":
                                     // 处理图片
+                                    // 首先尝试获取 url 属性
                                     if (part["data"]?["url"] != null)
                                     {
                                         string imageUrl = part["data"]?["url"]?.ToString() ?? "";
@@ -1073,7 +1146,21 @@ namespace DC.QQ.TG.Adapters
                                             _logger.LogDebug("Found image URL in QQ message: {Url}", imageUrl);
                                         }
                                     }
-                                    contentBuilder.Append("[Image]");
+                                    // 如果 url 不存在，尝试获取 file 属性
+                                    else if (part["data"]?["file"] != null)
+                                    {
+                                        string imageUrl = part["data"]?["file"]?.ToString() ?? "";
+                                        if (!string.IsNullOrEmpty(imageUrl))
+                                        {
+                                            // 存储图片 URL 以便后续处理
+                                            _lastImageUrl = imageUrl;
+                                            _logger.LogDebug("Found image file in QQ message: {File}", imageUrl);
+                                        }
+                                    }
+
+                                    // 获取图片摘要（如果有）
+                                    string summary = part["data"]?["summary"]?.ToString() ?? "[Image]";
+                                    contentBuilder.Append(summary);
                                     break;
 
                                 case "face":
@@ -1272,8 +1359,96 @@ namespace DC.QQ.TG.Adapters
                                     Timestamp = msg["time"] != null && long.TryParse(msg["time"]?.ToString(), out long timestamp)
                                         ? DateTimeOffset.FromUnixTimeSeconds(timestamp).DateTime
                                         : DateTime.Now,
-                                    AvatarUrl = GetQQAvatarUrl(userId)
+                                    AvatarUrl = GetQQAvatarUrl(userId),
+                                    // 添加图片和文件信息（先使用原始 URL，后面会异步下载）
+                                    ImageUrl = _lastImageUrl,
+                                    FileUrl = _lastFileUrl,
+                                    FileName = _lastFileName,
+                                    FileType = _lastFileType
                                 };
+
+                                // 异步下载图片和文件
+                                if (!string.IsNullOrEmpty(_lastImageUrl))
+                                {
+                                    string originalImageUrl = _lastImageUrl;
+
+                                    // 异步下载图片，但不等待完成，让消息处理继续进行
+                                    _ = Task.Run(async () =>
+                                    {
+                                        try
+                                        {
+                                            // 下载图片到临时目录
+                                            string localUrl = await FileDownloader.DownloadFileAsync(
+                                                originalImageUrl,
+                                                $"qq_image_{DateTime.Now.Ticks}.jpg",
+                                                _logger);
+
+                                            // 更新消息对象的 ImageUrl
+                                            message.ImageUrl = localUrl;
+                                            _logger.LogDebug("QQ image downloaded to: {LocalUrl}", localUrl);
+
+                                            // 重新触发消息事件，以便其他适配器能够使用本地文件
+                                            MessageReceived?.Invoke(this, message);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogError(ex, "Failed to download QQ image: {Url}", originalImageUrl);
+
+                                            // 如果下载失败，使用友好的错误消息而不是原始 URL
+                                            string errorCode = ex.HResult.ToString("X8");
+                                            message.Content += $"\n[FILE]\nImage: QQ Image\ncode: {errorCode}";
+                                            message.ImageUrl = null; // 清除图片 URL
+
+                                            // 重新触发消息事件
+                                            MessageReceived?.Invoke(this, message);
+                                        }
+                                    });
+                                }
+
+                                if (!string.IsNullOrEmpty(_lastFileUrl) && !string.IsNullOrEmpty(_lastFileName))
+                                {
+                                    string originalFileUrl = _lastFileUrl;
+                                    string originalFileName = _lastFileName;
+
+                                    // 异步下载文件，但不等待完成，让消息处理继续进行
+                                    _ = Task.Run(async () =>
+                                    {
+                                        try
+                                        {
+                                            // 下载文件到临时目录
+                                            string localUrl = await FileDownloader.DownloadFileAsync(
+                                                originalFileUrl,
+                                                originalFileName,
+                                                _logger);
+
+                                            // 更新消息对象的 FileUrl
+                                            message.FileUrl = localUrl;
+                                            _logger.LogDebug("QQ file downloaded to: {LocalUrl}", localUrl);
+
+                                            // 重新触发消息事件，以便其他适配器能够使用本地文件
+                                            MessageReceived?.Invoke(this, message);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            _logger.LogError(ex, "Failed to download QQ file: {Url}", originalFileUrl);
+
+                                            // 如果下载失败，使用友好的错误消息而不是原始 URL
+                                            string errorCode = ex.HResult.ToString("X8");
+                                            string fileType = message.FileType ?? "File";
+                                            message.Content += $"\n[FILE]\n{fileType}: {originalFileName}\ncode: {errorCode}";
+                                            message.FileUrl = null; // 清除文件 URL
+
+                                            // 重新触发消息事件
+                                            MessageReceived?.Invoke(this, message);
+                                        }
+                                    });
+                                }
+
+                                // 清除临时存储的图片和文件信息，避免影响下一条消息
+                                _lastImageUrl = null;
+                                _lastFileUrl = null;
+                                _lastFileName = null;
+                                _lastFileType = null;
 
                                 _logger.LogDebug("Received message from QQ group {GroupId}: {Message}",
                                     _groupId, message.Content);

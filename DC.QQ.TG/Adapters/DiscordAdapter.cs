@@ -515,13 +515,85 @@ namespace DC.QQ.TG.Adapters
                 // 检查附件类型
                 if (attachment.ContentType?.StartsWith("image/") == true)
                 {
-                    // 图片附件
+                    // 图片附件 - 下载到临时目录
+                    _logger.LogDebug("Downloading Discord image attachment: {Url}", attachment.Url);
+
+                    // 异步下载文件，但不等待完成，让消息处理继续进行
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            // 下载文件到临时目录
+                            string localUrl = await FileDownloader.DownloadFileAsync(
+                                attachment.Url,
+                                attachment.Filename,
+                                _logger);
+
+                            // 更新消息对象的 ImageUrl
+                            crossPlatformMessage.ImageUrl = localUrl;
+                            _logger.LogDebug("Discord image downloaded to: {LocalUrl}", localUrl);
+
+                            // 重新触发消息事件，以便其他适配器能够使用本地文件
+                            MessageReceived?.Invoke(this, crossPlatformMessage);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to download Discord image attachment: {Url}", attachment.Url);
+
+                            // 如果下载失败，使用友好的错误消息而不是原始 URL
+                            string errorCode = ex.HResult.ToString("X8");
+                            crossPlatformMessage.Content += $"\n[FILE]\nImage: {attachment.Filename}\ncode: {errorCode}";
+                            crossPlatformMessage.ImageUrl = null; // 清除图片 URL
+
+                            // 重新触发消息事件
+                            MessageReceived?.Invoke(this, crossPlatformMessage);
+                        }
+                    });
+
+                    // 先使用原始 URL，等下载完成后会更新
                     crossPlatformMessage.ImageUrl = attachment.Url;
                     _logger.LogDebug("Discord message contains image attachment: {Url}", attachment.Url);
                 }
                 else
                 {
-                    // 其他类型的文件
+                    // 其他类型的文件 - 下载到临时目录
+                    _logger.LogDebug("Downloading Discord file attachment: {FileName}, URL: {Url}",
+                        attachment.Filename, attachment.Url);
+
+                    // 异步下载文件，但不等待完成，让消息处理继续进行
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            // 下载文件到临时目录
+                            string localUrl = await FileDownloader.DownloadFileAsync(
+                                attachment.Url,
+                                attachment.Filename,
+                                _logger);
+
+                            // 更新消息对象的 FileUrl
+                            crossPlatformMessage.FileUrl = localUrl;
+                            _logger.LogDebug("Discord file downloaded to: {LocalUrl}", localUrl);
+
+                            // 重新触发消息事件，以便其他适配器能够使用本地文件
+                            MessageReceived?.Invoke(this, crossPlatformMessage);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to download Discord file attachment: {Url}", attachment.Url);
+
+                            // 如果下载失败，使用友好的错误消息而不是原始 URL
+                            string errorCode = ex.HResult.ToString("X8");
+                            string fileType = crossPlatformMessage.FileType ?? "File";
+                            crossPlatformMessage.Content += $"\n[FILE]\n{fileType}: {attachment.Filename}\ncode: {errorCode}";
+                            crossPlatformMessage.FileUrl = null; // 清除文件 URL
+
+                            // 重新触发消息事件
+                            MessageReceived?.Invoke(this, crossPlatformMessage);
+                        }
+                    });
+
+                    // 先使用原始 URL，等下载完成后会更新
                     crossPlatformMessage.FileUrl = attachment.Url;
                     crossPlatformMessage.FileName = attachment.Filename;
 

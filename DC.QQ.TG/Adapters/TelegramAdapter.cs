@@ -1,12 +1,14 @@
 using System;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using DC.QQ.TG.Interfaces;
 using DC.QQ.TG.Models;
+using DC.QQ.TG.Utils;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Telegram.Bot;
@@ -968,86 +970,201 @@ namespace DC.QQ.TG.Adapters
                 AvatarUrl = await GetTelegramAvatarUrlAsync(telegramMessage.From, _botClient, _cts.Token)
             };
 
-            // 获取 Telegram Bot Token
-            var token = _configuration["Telegram:BotToken"];
-
             // 处理各种类型的文件
             try
             {
+                // 创建临时目录用于存储下载的文件
+                string tempDir = Path.Combine(Path.GetTempPath(), "DC.QQ.TG", "TelegramFiles");
+                Directory.CreateDirectory(tempDir);
+
                 // 处理照片
                 if (telegramMessage.Photo != null && telegramMessage.Photo.Length > 0)
                 {
                     var fileId = telegramMessage.Photo[^1].FileId;
-                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
-                    message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
-                    _logger.LogDebug("Processed Telegram photo: {Url}", message.ImageUrl);
+                    string fileName = $"photo_{DateTime.Now.Ticks}.jpg";
+
+                    // 下载文件到临时目录
+                    string filePath = await DownloadTelegramFileAsync(fileId, fileName, _cts.Token);
+
+                    // 使用本地文件路径
+                    message.ImageUrl = $"file://{filePath}";
+                    _logger.LogDebug("Downloaded Telegram photo to: {FilePath}", filePath);
                 }
                 // 处理静态贴纸
                 else if (telegramMessage.Sticker != null && telegramMessage.Sticker.IsAnimated == false)
                 {
                     var fileId = telegramMessage.Sticker.FileId;
-                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
-                    message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
-                    _logger.LogDebug("Processed Telegram sticker: {Url}", message.ImageUrl);
+                    string fileName = $"sticker_{DateTime.Now.Ticks}.webp";
+
+                    // 下载文件到临时目录
+                    string filePath = await DownloadTelegramFileAsync(fileId, fileName, _cts.Token);
+
+                    // 使用本地文件路径
+                    message.ImageUrl = $"file://{filePath}";
+                    _logger.LogDebug("Downloaded Telegram sticker to: {FilePath}", filePath);
                 }
                 // 处理文档
                 else if (telegramMessage.Document != null)
                 {
                     var fileId = telegramMessage.Document.FileId;
-                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
-                    message.FileUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
-                    message.FileName = telegramMessage.Document.FileName;
+                    string fileName = telegramMessage.Document.FileName ?? $"document_{DateTime.Now.Ticks}";
+
+                    // 下载文件到临时目录
+                    string filePath = await DownloadTelegramFileAsync(fileId, fileName, _cts.Token);
+
+                    // 使用本地文件路径
+                    message.FileUrl = $"file://{filePath}";
+                    message.FileName = fileName;
                     message.FileType = "document";
-                    _logger.LogDebug("Processed Telegram document: {FileName}, URL: {Url}", message.FileName, message.FileUrl);
+                    _logger.LogDebug("Downloaded Telegram document to: {FilePath}", filePath);
                 }
                 // 处理视频
                 else if (telegramMessage.Video != null)
                 {
                     var fileId = telegramMessage.Video.FileId;
-                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
-                    message.FileUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
-                    message.FileName = telegramMessage.Video.FileName ?? "video.mp4";
+                    string fileName = telegramMessage.Video.FileName ?? $"video_{DateTime.Now.Ticks}.mp4";
+
+                    // 下载文件到临时目录
+                    string filePath = await DownloadTelegramFileAsync(fileId, fileName, _cts.Token);
+
+                    // 使用本地文件路径
+                    message.FileUrl = $"file://{filePath}";
+                    message.FileName = fileName;
                     message.FileType = "video";
-                    _logger.LogDebug("Processed Telegram video: {FileName}, URL: {Url}", message.FileName, message.FileUrl);
+                    _logger.LogDebug("Downloaded Telegram video to: {FilePath}", filePath);
                 }
                 // 处理音频
                 else if (telegramMessage.Audio != null)
                 {
                     var fileId = telegramMessage.Audio.FileId;
-                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
-                    message.FileUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
-                    message.FileName = telegramMessage.Audio.FileName ?? "audio.mp3";
+                    string fileName = telegramMessage.Audio.FileName ?? $"audio_{DateTime.Now.Ticks}.mp3";
+
+                    // 下载文件到临时目录
+                    string filePath = await DownloadTelegramFileAsync(fileId, fileName, _cts.Token);
+
+                    // 使用本地文件路径
+                    message.FileUrl = $"file://{filePath}";
+                    message.FileName = fileName;
                     message.FileType = "audio";
-                    _logger.LogDebug("Processed Telegram audio: {FileName}, URL: {Url}", message.FileName, message.FileUrl);
+                    _logger.LogDebug("Downloaded Telegram audio to: {FilePath}", filePath);
                 }
                 // 处理语音消息
                 else if (telegramMessage.Voice != null)
                 {
                     var fileId = telegramMessage.Voice.FileId;
-                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
-                    message.FileUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
-                    message.FileName = "voice.ogg";
+                    string fileName = $"voice_{DateTime.Now.Ticks}.ogg";
+
+                    // 下载文件到临时目录
+                    string filePath = await DownloadTelegramFileAsync(fileId, fileName, _cts.Token);
+
+                    // 使用本地文件路径
+                    message.FileUrl = $"file://{filePath}";
+                    message.FileName = fileName;
                     message.FileType = "audio";
-                    _logger.LogDebug("Processed Telegram voice message: URL: {Url}", message.FileUrl);
+                    _logger.LogDebug("Downloaded Telegram voice message to: {FilePath}", filePath);
                 }
                 // 处理动画/GIF
                 else if (telegramMessage.Animation != null)
                 {
                     var fileId = telegramMessage.Animation.FileId;
-                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
-                    message.FileUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
-                    message.FileName = telegramMessage.Animation.FileName ?? "animation.gif";
+                    string fileName = telegramMessage.Animation.FileName ?? $"animation_{DateTime.Now.Ticks}.gif";
+
+                    // 下载文件到临时目录
+                    string filePath = await DownloadTelegramFileAsync(fileId, fileName, _cts.Token);
+
+                    // 使用本地文件路径
+                    message.FileUrl = $"file://{filePath}";
+                    message.FileName = fileName;
                     message.FileType = "animation";
-                    _logger.LogDebug("Processed Telegram animation: {FileName}, URL: {Url}", message.FileName, message.FileUrl);
+                    _logger.LogDebug("Downloaded Telegram animation to: {FilePath}", filePath);
                 }
+
+                // 临时文件清理由 FileDownloader 处理
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing Telegram file attachment");
+
+                // 如果下载失败，使用友好的错误消息而不是原始 URL
+                string errorCode = ex.HResult.ToString("X8");
+
+                // 根据异常类型确定文件类型和名称
+                string fileType = "File";
+                string fileName = "unknown";
+
+                if (telegramMessage.Photo != null && telegramMessage.Photo.Length > 0)
+                {
+                    fileType = "Image";
+                    fileName = "photo.jpg";
+                }
+                else if (telegramMessage.Sticker != null)
+                {
+                    fileType = "Sticker";
+                    fileName = "sticker.webp";
+                }
+                else if (telegramMessage.Document != null)
+                {
+                    fileType = "Document";
+                    fileName = telegramMessage.Document.FileName ?? "document";
+                }
+                else if (telegramMessage.Video != null)
+                {
+                    fileType = "Video";
+                    fileName = telegramMessage.Video.FileName ?? "video.mp4";
+                }
+                else if (telegramMessage.Audio != null)
+                {
+                    fileType = "Audio";
+                    fileName = telegramMessage.Audio.FileName ?? "audio.mp3";
+                }
+                else if (telegramMessage.Voice != null)
+                {
+                    fileType = "Voice";
+                    fileName = "voice.ogg";
+                }
+                else if (telegramMessage.Animation != null)
+                {
+                    fileType = "Animation";
+                    fileName = telegramMessage.Animation.FileName ?? "animation.gif";
+                }
+
+                message.Content += $"\n[FILE]\n{fileType}: {fileName}\ncode: {errorCode}";
+                message.ImageUrl = null; // 清除图片 URL
+                message.FileUrl = null; // 清除文件 URL
             }
 
             _logger.LogInformation("Received message from Telegram: {Message}", messageText);
             MessageReceived?.Invoke(this, message);
+        }
+
+        /// <summary>
+        /// 下载 Telegram 文件到本地临时目录
+        /// </summary>
+        private async Task<string> DownloadTelegramFileAsync(string fileId, string fileName, CancellationToken cancellationToken)
+        {
+            try
+            {
+                // 获取文件信息
+                var fileInfo = await _botClient.GetFile(fileId, cancellationToken);
+
+                // 构建 Telegram 文件 URL
+                var token = _configuration["Telegram:BotToken"];
+                var url = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+
+                // 使用 FileDownloader 下载文件
+                string localUrl = await FileDownloader.DownloadFileAsync(url, fileName, _logger, cancellationToken);
+
+                // 从 file:// URL 中提取本地文件路径
+                string filePath = localUrl.StartsWith("file://") ? localUrl["file://".Length..] : localUrl;
+
+                _logger.LogDebug("Downloaded Telegram file to: {FilePath}", filePath);
+                return filePath;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error downloading Telegram file: {FileId}", fileId);
+                throw;
+            }
         }
 
         /// <summary>
@@ -1072,12 +1189,14 @@ namespace DC.QQ.TG.Adapters
                 {
                     // Get the file path for the photo
                     var fileId = photos.Photos[0][^1].FileId; // Get the highest resolution photo
-                    var fileInfo = await botClient.GetFile(fileId, cancellationToken);
-                    var token = _configuration["Telegram:BotToken"];
 
-                    // Construct the URL to the photo
-                    string avatarUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
-                    _logger.LogInformation("Successfully retrieved Telegram avatar URL for user {UserId}", user.Id);
+                    // 下载头像到临时目录
+                    string fileName = $"avatar_{user.Id}_{DateTime.Now.Ticks}.jpg";
+                    string filePath = await DownloadTelegramFileAsync(fileId, fileName, cancellationToken);
+
+                    // 返回本地文件路径
+                    string avatarUrl = $"file://{filePath}";
+                    _logger.LogInformation("Successfully downloaded Telegram avatar for user {UserId} to {FilePath}", user.Id, filePath);
                     return avatarUrl;
                 }
                 else
