@@ -21,6 +21,11 @@ namespace DC.QQ.TG.Models
         public string? ImageUrl { get; set; }
         public string? AvatarUrl { get; set; }
 
+        // 新增属性，用于支持文件传输
+        public string? FileUrl { get; set; }
+        public string? FileName { get; set; }
+        public string? FileType { get; set; } // 例如: "document", "audio", "video" 等
+
         /// <summary>
         /// Gets the formatted username in the format <user>@<platform>
         /// </summary>

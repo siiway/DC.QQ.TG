@@ -5,7 +5,7 @@ A C# console application that enables cross-platform messaging between Discord, 
 ## Features
 
 - Bidirectional message synchronization between Discord, QQ, and Telegram
-- Support for text messages and images
+- Support for text messages, images, and files
 - User avatars and formatted usernames across platforms
 - WebSocket and HTTP support for QQ integration
 - Discord Bot API and Webhook support
@@ -130,6 +130,22 @@ For more detailed update instructions, see [UPDATE.md](UPDATE.md).
 2. Get your API token and set it in the configuration
 3. Get your QQ group ID and set it in the configuration
 4. You can use either WebSocket (ws://) or HTTP protocol for NapCat
+
+> [!NOTE]
+> HTTP is **NOT** recommended for NapCat integration.
+> Please use WebSocket instead.
+
+#### NapCat Media and File Support
+
+The application uses NapCat API to send images and files directly to QQ:
+
+- **Images**: Images from Discord and Telegram are sent to QQ using the NapCat API's image message type
+- **Files**: Files from Discord and Telegram are sent to QQ using the NapCat API's file message type
+- Supported file sources include:
+  - Network URLs (http:// or https://)
+  - Local file paths (file://)
+  - Base64 encoded data
+- File types are automatically detected based on file extensions
 
 ### Discord Setup
 
@@ -312,6 +328,28 @@ Messages are formatted as `<user>@<platform>: <message>` across all platforms. F
 - `bob@telegram: Hello from Telegram!`
 
 User avatars are also synchronized across platforms when available.
+
+### Media and File Sharing
+
+The application supports sharing media and files across platforms:
+
+#### Images
+
+- Images shared on any platform will be forwarded to all other platforms
+- Discord: Images appear as embedded content
+- Telegram: Images are sent as photos
+- QQ: Images are sent directly using NapCat API
+
+#### Files
+
+- Files shared on any platform will be forwarded to all other platforms
+- Supported file types include documents, videos, audio files, and more
+- Discord: Files appear as embedded links with file type information
+- Telegram: Files are sent using the appropriate method based on file type (document, video, audio)
+- QQ: Files are sent directly using NapCat API with proper file names and types
+
+> [!NOTE]
+> File sharing capabilities may vary depending on platform limitations and API restrictions.
 
 ## Architecture
 

@@ -5,6 +5,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using DC.QQ.TG.Interfaces;
 using DC.QQ.TG.Models;
 using Microsoft.Extensions.Configuration;
@@ -30,6 +32,10 @@ namespace DC.QQ.TG.Adapters
         private Task? _receiveTask;
         private Task? _sendTask;
         private bool _useWebSocket;
+        private string? _lastImageUrl;
+        private string? _lastFileUrl;
+        private string? _lastFileName;
+        private string? _lastFileType;
         private readonly Dictionary<string, TaskCompletionSource<string>> _pendingRequests = new Dictionary<string, TaskCompletionSource<string>>();
 
         public MessageSource Platform => MessageSource.QQ;
@@ -258,6 +264,29 @@ namespace DC.QQ.TG.Adapters
                         AvatarUrl = GetQQAvatarUrl(userId)
                     };
 
+                    // 添加图片 URL（如果有）
+                    if (!string.IsNullOrEmpty(_lastImageUrl))
+                    {
+                        qqMessage.ImageUrl = _lastImageUrl;
+                        _logger.LogInformation("Added image URL to QQ message: {Url}", _lastImageUrl);
+                        _lastImageUrl = null; // 清除，避免重复使用
+                    }
+
+                    // 添加文件 URL（如果有）
+                    if (!string.IsNullOrEmpty(_lastFileUrl))
+                    {
+                        qqMessage.FileUrl = _lastFileUrl;
+                        qqMessage.FileName = _lastFileName;
+                        qqMessage.FileType = _lastFileType;
+                        _logger.LogInformation("Added file URL to QQ message: {FileName}, {FileType}, {Url}",
+                            _lastFileName, _lastFileType, _lastFileUrl);
+
+                        // 清除，避免重复使用
+                        _lastFileUrl = null;
+                        _lastFileName = null;
+                        _lastFileType = null;
+                    }
+
                     _logger.LogDebug("Received message from QQ group {GroupId}: {Message}",
                         _groupId, qqMessage.Content);
 
@@ -470,6 +499,30 @@ namespace DC.QQ.TG.Adapters
                 // Format the message with source and sender info
                 string formattedMessage = $"{message.GetFormattedUsername()}: {message.Content}";
 
+                // 检查是否有图片或文件
+                bool hasAttachment = !string.IsNullOrEmpty(message.ImageUrl) || !string.IsNullOrEmpty(message.FileUrl);
+
+                // 如果有附件，尝试使用 NapCat API 发送
+                if (hasAttachment)
+                {
+                    // 先发送文本消息
+                    await SendTextMessageAsync(formattedMessage);
+
+                    // 然后发送图片或文件
+                    if (!string.IsNullOrEmpty(message.ImageUrl))
+                    {
+                        await SendImageMessageAsync(message.ImageUrl);
+                    }
+
+                    if (!string.IsNullOrEmpty(message.FileUrl))
+                    {
+                        await SendFileMessageAsync(message.FileUrl, message.FileName);
+                    }
+
+                    // 已经发送了消息，直接返回
+                    return;
+                }
+
                 // Check if we should show NapCat responses
                 bool showNapCatResponse = _configuration["Debug:ShowNapCatResponse"]?.ToLower() == "true";
 
@@ -601,6 +654,196 @@ namespace DC.QQ.TG.Adapters
             string avatarUrl = $"https://q1.qlogo.cn/g?b=qq&nk={userId}&s=640";
             _logger.LogInformation("Successfully retrieved QQ avatar URL: {AvatarUrl}", avatarUrl);
             return avatarUrl;
+        }
+
+        /// <summary>
+        /// 发送纯文本消息到 QQ 群
+        /// </summary>
+        private async Task SendTextMessageAsync(string text)
+        {
+            try
+            {
+                // 检查是否应该显示 NapCat 响应
+                bool showNapCatResponse = _configuration["Debug:ShowNapCatResponse"]?.ToLower() == "true";
+
+                if (_useWebSocket && _webSocket?.State == WebSocketState.Open)
+                {
+                    // 通过 WebSocket 发送
+                    await SendWebSocketCommandAsync(new
+                    {
+                        action = "send_group_msg",
+                        @params = new
+                        {
+                            group_id = _groupId,
+                            message = text
+                        }
+                    });
+
+                    _logger.LogInformation("Text message sent to QQ group {GroupId} via WebSocket", _groupId);
+                }
+                else
+                {
+                    // 通过 HTTP 发送
+                    var response = await _httpClient.PostJsonAsync<JObject>("/send_group_msg", new
+                    {
+                        group_id = _groupId,
+                        message = text
+                    });
+
+                    if (showNapCatResponse)
+                    {
+                        _logger.LogInformation("NapCat API Response for text message: {Response}",
+                            response.ToString(Formatting.Indented));
+                    }
+
+                    _logger.LogInformation("Text message sent to QQ group {GroupId} via HTTP", _groupId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send text message to QQ group {GroupId}", _groupId);
+            }
+        }
+
+        /// <summary>
+        /// 发送图片消息到 QQ 群
+        /// </summary>
+        private async Task SendImageMessageAsync(string imageUrl)
+        {
+            try
+            {
+                // 检查是否应该显示 NapCat 响应
+                bool showNapCatResponse = _configuration["Debug:ShowNapCatResponse"]?.ToLower() == "true";
+
+                // 构建图片消息
+                var imageMessage = new object[]
+                {
+                    new
+                    {
+                        type = "image",
+                        data = new
+                        {
+                            file = imageUrl
+                        }
+                    }
+                };
+
+                if (_useWebSocket && _webSocket?.State == WebSocketState.Open)
+                {
+                    // 通过 WebSocket 发送
+                    await SendWebSocketCommandAsync(new
+                    {
+                        action = "send_group_msg",
+                        @params = new
+                        {
+                            group_id = _groupId,
+                            message = imageMessage
+                        }
+                    });
+
+                    _logger.LogInformation("Image message sent to QQ group {GroupId} via WebSocket: {Url}", _groupId, imageUrl);
+                }
+                else
+                {
+                    // 通过 HTTP 发送
+                    var response = await _httpClient.PostJsonAsync<JObject>("/send_group_msg", new
+                    {
+                        group_id = _groupId,
+                        message = imageMessage
+                    });
+
+                    if (showNapCatResponse)
+                    {
+                        _logger.LogInformation("NapCat API Response for image message: {Response}",
+                            response.ToString(Formatting.Indented));
+                    }
+
+                    _logger.LogInformation("Image message sent to QQ group {GroupId} via HTTP: {Url}", _groupId, imageUrl);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send image message to QQ group {GroupId}: {Url}", _groupId, imageUrl);
+            }
+        }
+
+        /// <summary>
+        /// 发送文件消息到 QQ 群
+        /// </summary>
+        private async Task SendFileMessageAsync(string fileUrl, string fileName)
+        {
+            try
+            {
+                // 检查是否应该显示 NapCat 响应
+                bool showNapCatResponse = _configuration["Debug:ShowNapCatResponse"]?.ToLower() == "true";
+
+                // 如果没有文件名，从 URL 中提取
+                if (string.IsNullOrEmpty(fileName))
+                {
+                    try
+                    {
+                        fileName = Path.GetFileName(new Uri(fileUrl).LocalPath);
+                    }
+                    catch
+                    {
+                        fileName = "file_" + DateTime.Now.ToString("yyyyMMddHHmmss");
+                    }
+                }
+
+                // 构建文件消息
+                var fileMessage = new object[]
+                {
+                    new
+                    {
+                        type = "file",
+                        data = new
+                        {
+                            file = fileUrl,
+                            name = fileName
+                        }
+                    }
+                };
+
+                if (_useWebSocket && _webSocket?.State == WebSocketState.Open)
+                {
+                    // 通过 WebSocket 发送
+                    await SendWebSocketCommandAsync(new
+                    {
+                        action = "send_group_msg",
+                        @params = new
+                        {
+                            group_id = _groupId,
+                            message = fileMessage
+                        }
+                    });
+
+                    _logger.LogInformation("File message sent to QQ group {GroupId} via WebSocket: {FileName}, {Url}",
+                        _groupId, fileName, fileUrl);
+                }
+                else
+                {
+                    // 通过 HTTP 发送
+                    var response = await _httpClient.PostJsonAsync<JObject>("/send_group_msg", new
+                    {
+                        group_id = _groupId,
+                        message = fileMessage
+                    });
+
+                    if (showNapCatResponse)
+                    {
+                        _logger.LogInformation("NapCat API Response for file message: {Response}",
+                            response.ToString(Formatting.Indented));
+                    }
+
+                    _logger.LogInformation("File message sent to QQ group {GroupId} via HTTP: {FileName}, {Url}",
+                        _groupId, fileName, fileUrl);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send file message to QQ group {GroupId}: {FileName}, {Url}",
+                    _groupId, fileName, fileUrl);
+            }
         }
 
         /// <summary>
@@ -819,7 +1062,17 @@ namespace DC.QQ.TG.Adapters
                                     break;
 
                                 case "image":
-                                    // For image type, add a placeholder
+                                    // 处理图片
+                                    if (part["data"]?["url"] != null)
+                                    {
+                                        string imageUrl = part["data"]?["url"]?.ToString() ?? "";
+                                        if (!string.IsNullOrEmpty(imageUrl))
+                                        {
+                                            // 存储图片 URL 以便后续处理
+                                            _lastImageUrl = imageUrl;
+                                            _logger.LogDebug("Found image URL in QQ message: {Url}", imageUrl);
+                                        }
+                                    }
                                     contentBuilder.Append("[Image]");
                                     break;
 
@@ -842,6 +1095,48 @@ namespace DC.QQ.TG.Adapters
                                         // Add a space after the mention
                                         contentBuilder.Append(" ");
                                     }
+                                    break;
+
+                                case "file":
+                                    // 处理文件
+                                    if (part["data"] != null)
+                                    {
+                                        string? fileUrl = part["data"]?["url"]?.ToString();
+                                        string? fileName = part["data"]?["name"]?.ToString();
+
+                                        if (!string.IsNullOrEmpty(fileUrl) && !string.IsNullOrEmpty(fileName))
+                                        {
+                                            // 存储文件信息以便后续处理
+                                            _lastFileUrl = fileUrl;
+                                            _lastFileName = fileName;
+                                            _lastFileType = "document"; // 默认为文档类型
+
+                                            // 尝试根据文件扩展名确定类型
+                                            string extension = Path.GetExtension(fileName).ToLowerInvariant();
+                                            if (extension.StartsWith("."))
+                                            {
+                                                extension = extension.Substring(1);
+                                            }
+
+                                            // 根据扩展名确定文件类型
+                                            if (new[] { "jpg", "jpeg", "png", "gif", "bmp", "webp" }.Contains(extension))
+                                            {
+                                                _lastFileType = "image";
+                                            }
+                                            else if (new[] { "mp4", "avi", "mov", "wmv", "flv", "mkv" }.Contains(extension))
+                                            {
+                                                _lastFileType = "video";
+                                            }
+                                            else if (new[] { "mp3", "wav", "ogg", "flac", "aac", "m4a" }.Contains(extension))
+                                            {
+                                                _lastFileType = "audio";
+                                            }
+
+                                            _logger.LogDebug("Found file in QQ message: {FileName}, Type: {FileType}, URL: {FileUrl}",
+                                                _lastFileName, _lastFileType, _lastFileUrl);
+                                        }
+                                    }
+                                    contentBuilder.Append("[File]");
                                     break;
 
                                 default:

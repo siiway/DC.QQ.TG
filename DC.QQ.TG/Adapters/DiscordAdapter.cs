@@ -3,6 +3,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using DC.QQ.TG.Interfaces;
 using DC.QQ.TG.Models;
 using Microsoft.Extensions.Configuration;
@@ -506,13 +507,40 @@ namespace DC.QQ.TG.Adapters
                 AvatarUrl = avatarUrl
             };
 
-            // If there's an attachment, add it as an image URL
+            // 处理附件
             if (userMessage.Attachments.Count > 0)
             {
                 var attachment = userMessage.Attachments.First();
+
+                // 检查附件类型
                 if (attachment.ContentType?.StartsWith("image/") == true)
                 {
+                    // 图片附件
                     crossPlatformMessage.ImageUrl = attachment.Url;
+                    _logger.LogDebug("Discord message contains image attachment: {Url}", attachment.Url);
+                }
+                else
+                {
+                    // 其他类型的文件
+                    crossPlatformMessage.FileUrl = attachment.Url;
+                    crossPlatformMessage.FileName = attachment.Filename;
+
+                    // 确定文件类型
+                    if (attachment.ContentType?.StartsWith("video/") == true)
+                    {
+                        crossPlatformMessage.FileType = "video";
+                    }
+                    else if (attachment.ContentType?.StartsWith("audio/") == true)
+                    {
+                        crossPlatformMessage.FileType = "audio";
+                    }
+                    else
+                    {
+                        crossPlatformMessage.FileType = "document";
+                    }
+
+                    _logger.LogDebug("Discord message contains file attachment: {FileName}, Type: {FileType}, URL: {FileUrl}",
+                        crossPlatformMessage.FileName, crossPlatformMessage.FileType, crossPlatformMessage.FileUrl);
                 }
             }
 
@@ -576,24 +604,47 @@ namespace DC.QQ.TG.Adapters
                         avatar_url = avatarUrl // Use sender's avatar or default
                     };
 
-                    // If there's an image URL, we could add it as an embed
-                    if (!string.IsNullOrEmpty(message.ImageUrl))
+                    // 处理图片或文件
+                    if (!string.IsNullOrEmpty(message.ImageUrl) || !string.IsNullOrEmpty(message.FileUrl))
                     {
+                        var embedsArray = new List<object>();
+
+                        // 处理图片
+                        if (!string.IsNullOrEmpty(message.ImageUrl))
+                        {
+                            embedsArray.Add(new
+                            {
+                                image = new
+                                {
+                                    url = message.ImageUrl
+                                }
+                            });
+                        }
+
+                        // 处理文件
+                        if (!string.IsNullOrEmpty(message.FileUrl))
+                        {
+                            // 构建文件描述
+                            string fileDescription = message.FileName ?? "File";
+                            if (!string.IsNullOrEmpty(message.FileType))
+                            {
+                                fileDescription = $"{message.FileType.ToUpperInvariant()}: {fileDescription}";
+                            }
+
+                            embedsArray.Add(new
+                            {
+                                title = fileDescription,
+                                url = message.FileUrl,
+                                description = $"[Click to download]({message.FileUrl})"
+                            });
+                        }
+
                         var payloadWithEmbed = new
                         {
                             content = translatedContent, // Use translated content without special formatting
                             username = message.GetFormattedUsername(), // Use the formatted username: <user>@<platform>
                             avatar_url = avatarUrl, // Use the same avatar URL as in the regular payload
-                            embeds = new[]
-                            {
-                                new
-                                {
-                                    image = new
-                                    {
-                                        url = message.ImageUrl
-                                    }
-                                }
-                            }
+                            embeds = embedsArray.ToArray()
                         };
 
                         await _httpClient.PostJsonAsync(_webhookUrl, payloadWithEmbed);
@@ -656,15 +707,42 @@ namespace DC.QQ.TG.Adapters
 
                             try
                             {
-                                // Send the message
+                                // Send the message with any attachments
+                                // 创建嵌入对象
+                                EmbedBuilder? embedBuilder = null;
+                                bool hasEmbed = false;
+
+                                // 处理图片
                                 if (!string.IsNullOrEmpty(message.ImageUrl))
                                 {
-                                    // Create an embed with the image
-                                    var embed = new EmbedBuilder()
-                                        .WithImageUrl(message.ImageUrl)
-                                        .Build();
+                                    embedBuilder = new EmbedBuilder().WithImageUrl(message.ImageUrl);
+                                    hasEmbed = true;
+                                }
 
-                                    await channel.SendMessageAsync(text: formattedContent, embed: embed);
+                                // 处理文件
+                                if (!string.IsNullOrEmpty(message.FileUrl))
+                                {
+                                    if (embedBuilder == null)
+                                    {
+                                        embedBuilder = new EmbedBuilder();
+                                    }
+
+                                    string fileDescription = message.FileName ?? "File";
+                                    if (!string.IsNullOrEmpty(message.FileType))
+                                    {
+                                        fileDescription = $"{message.FileType.ToUpperInvariant()}: {fileDescription}";
+                                    }
+
+                                    embedBuilder.WithTitle(fileDescription)
+                                        .WithUrl(message.FileUrl)
+                                        .WithDescription($"[Click to download]({message.FileUrl})");
+                                    hasEmbed = true;
+                                }
+
+                                // 发送消息
+                                if (hasEmbed && embedBuilder != null)
+                                {
+                                    await channel.SendMessageAsync(text: formattedContent, embed: embedBuilder.Build());
                                 }
                                 else
                                 {

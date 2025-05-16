@@ -160,22 +160,98 @@ namespace DC.QQ.TG.Adapters
                     parseMode: ParseMode.Html
                 );
 
-                // If there's an image URL, send it as a photo
+                // 处理图片
                 if (!string.IsNullOrEmpty(message.ImageUrl))
                 {
-                    // Format caption with HTML if needed
-                    string caption = null;
+                    try
+                    {
+                        // Format caption with HTML if needed
+                        string caption = null;
 
-                    // If we want to add a caption to the image, we can do it here
-                    // caption = $"<b>{message.GetFormattedUsername()}</b>";
+                        // Send the photo using the URL directly
+                        await _botClient.SendPhoto(
+                            chatId: _chatId,
+                            photo: InputFile.FromUri(new Uri(message.ImageUrl)),
+                            caption: caption,
+                            parseMode: caption != null ? ParseMode.Html : default
+                        );
 
-                    // Send the photo using the URL directly
-                    await _botClient.SendPhoto(
-                        chatId: _chatId,
-                        photo: InputFile.FromUri(new Uri(message.ImageUrl)),
-                        caption: caption,
-                        parseMode: caption != null ? ParseMode.Html : default
-                    );
+                        _logger.LogInformation("Image sent to Telegram: {Url}", message.ImageUrl);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to send image to Telegram: {Url}", message.ImageUrl);
+                    }
+                }
+
+                // 处理文件
+                if (!string.IsNullOrEmpty(message.FileUrl))
+                {
+                    try
+                    {
+                        // 根据文件类型选择发送方法
+                        if (message.FileType == "video")
+                        {
+                            // 发送视频
+                            await _botClient.SendVideo(
+                                chatId: _chatId,
+                                video: InputFile.FromUri(new Uri(message.FileUrl)),
+                                caption: message.FileName
+                            );
+                            _logger.LogInformation("Video sent to Telegram: {FileName}, {Url}", message.FileName, message.FileUrl);
+                        }
+                        else if (message.FileType == "audio")
+                        {
+                            // 发送音频
+                            await _botClient.SendAudio(
+                                chatId: _chatId,
+                                audio: InputFile.FromUri(new Uri(message.FileUrl)),
+                                caption: message.FileName
+                            );
+                            _logger.LogInformation("Audio sent to Telegram: {FileName}, {Url}", message.FileName, message.FileUrl);
+                        }
+                        else if (message.FileType == "animation")
+                        {
+                            // 发送动画/GIF
+                            await _botClient.SendAnimation(
+                                chatId: _chatId,
+                                animation: InputFile.FromUri(new Uri(message.FileUrl)),
+                                caption: message.FileName
+                            );
+                            _logger.LogInformation("Animation sent to Telegram: {FileName}, {Url}", message.FileName, message.FileUrl);
+                        }
+                        else
+                        {
+                            // 发送普通文档
+                            await _botClient.SendDocument(
+                                chatId: _chatId,
+                                document: InputFile.FromUri(new Uri(message.FileUrl)),
+                                caption: message.FileName
+                            );
+                            _logger.LogInformation("Document sent to Telegram: {FileName}, {Url}", message.FileName, message.FileUrl);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to send file to Telegram: {FileName}, {Url}", message.FileName, message.FileUrl);
+
+                        // 如果特定类型发送失败，尝试作为普通文档发送
+                        try
+                        {
+                            await _botClient.SendDocument(
+                                chatId: _chatId,
+                                document: InputFile.FromUri(new Uri(message.FileUrl)),
+                                caption: message.FileName
+                            );
+                            _logger.LogInformation("File sent as document to Telegram after type-specific method failed: {FileName}, {Url}",
+                                message.FileName, message.FileUrl);
+                        }
+                        catch (Exception docEx)
+                        {
+                            _logger.LogError(docEx, "Failed to send file as document to Telegram: {FileName}, {Url}",
+                                message.FileName, message.FileUrl);
+                        }
+                    }
                 }
 
                 _logger.LogInformation("Message sent to Telegram");
@@ -892,21 +968,82 @@ namespace DC.QQ.TG.Adapters
                 AvatarUrl = await GetTelegramAvatarUrlAsync(telegramMessage.From, _botClient, _cts.Token)
             };
 
-            // If the message contains a photo, get the URL
-            if (telegramMessage.Photo != null && telegramMessage.Photo.Length > 0)
+            // 获取 Telegram Bot Token
+            var token = _configuration["Telegram:BotToken"];
+
+            // 处理各种类型的文件
+            try
             {
-                var fileId = telegramMessage.Photo[^1].FileId;
-                var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
-                var token = _configuration["Telegram:BotToken"];
-                message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+                // 处理照片
+                if (telegramMessage.Photo != null && telegramMessage.Photo.Length > 0)
+                {
+                    var fileId = telegramMessage.Photo[^1].FileId;
+                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
+                    message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+                    _logger.LogDebug("Processed Telegram photo: {Url}", message.ImageUrl);
+                }
+                // 处理静态贴纸
+                else if (telegramMessage.Sticker != null && telegramMessage.Sticker.IsAnimated == false)
+                {
+                    var fileId = telegramMessage.Sticker.FileId;
+                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
+                    message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+                    _logger.LogDebug("Processed Telegram sticker: {Url}", message.ImageUrl);
+                }
+                // 处理文档
+                else if (telegramMessage.Document != null)
+                {
+                    var fileId = telegramMessage.Document.FileId;
+                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
+                    message.FileUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+                    message.FileName = telegramMessage.Document.FileName;
+                    message.FileType = "document";
+                    _logger.LogDebug("Processed Telegram document: {FileName}, URL: {Url}", message.FileName, message.FileUrl);
+                }
+                // 处理视频
+                else if (telegramMessage.Video != null)
+                {
+                    var fileId = telegramMessage.Video.FileId;
+                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
+                    message.FileUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+                    message.FileName = telegramMessage.Video.FileName ?? "video.mp4";
+                    message.FileType = "video";
+                    _logger.LogDebug("Processed Telegram video: {FileName}, URL: {Url}", message.FileName, message.FileUrl);
+                }
+                // 处理音频
+                else if (telegramMessage.Audio != null)
+                {
+                    var fileId = telegramMessage.Audio.FileId;
+                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
+                    message.FileUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+                    message.FileName = telegramMessage.Audio.FileName ?? "audio.mp3";
+                    message.FileType = "audio";
+                    _logger.LogDebug("Processed Telegram audio: {FileName}, URL: {Url}", message.FileName, message.FileUrl);
+                }
+                // 处理语音消息
+                else if (telegramMessage.Voice != null)
+                {
+                    var fileId = telegramMessage.Voice.FileId;
+                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
+                    message.FileUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+                    message.FileName = "voice.ogg";
+                    message.FileType = "audio";
+                    _logger.LogDebug("Processed Telegram voice message: URL: {Url}", message.FileUrl);
+                }
+                // 处理动画/GIF
+                else if (telegramMessage.Animation != null)
+                {
+                    var fileId = telegramMessage.Animation.FileId;
+                    var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
+                    message.FileUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+                    message.FileName = telegramMessage.Animation.FileName ?? "animation.gif";
+                    message.FileType = "animation";
+                    _logger.LogDebug("Processed Telegram animation: {FileName}, URL: {Url}", message.FileName, message.FileUrl);
+                }
             }
-            // If the message contains a sticker, get the URL
-            else if (telegramMessage.Sticker != null && telegramMessage.Sticker.IsAnimated == false)
+            catch (Exception ex)
             {
-                var fileId = telegramMessage.Sticker.FileId;
-                var fileInfo = await _botClient.GetFile(fileId, _cts.Token);
-                var token = _configuration["Telegram:BotToken"];
-                message.ImageUrl = $"https://api.telegram.org/file/bot{token}/{fileInfo.FilePath}";
+                _logger.LogError(ex, "Error processing Telegram file attachment");
             }
 
             _logger.LogInformation("Received message from Telegram: {Message}", messageText);
